@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import '../benshi/radio_controller.dart';
 import 'connection_screen.dart';
 
 // Import the placeholder views
@@ -19,17 +20,18 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  late final RadioController _radioController;
   late final List<Widget> _toolPages;
 
   @override
   void initState() {
     super.initState();
-    // Initialize the list of pages (tools).
-    // Each tool view gets a reference to the same, single bluetooth connection.
+    // Create ONE radio controller to share across all tool pages.
+    _radioController = RadioController(connection: widget.connection);
     _toolPages = <Widget>[
-      DashboardView(connection: widget.connection),
-      ScannerView(connection: widget.connection),
-      ProgrammerView(connection: widget.connection),
+      DashboardView(radioController: _radioController),
+      ScannerView(radioController: _radioController),
+      ProgrammerView(radioController: _radioController),
     ];
   }
 
@@ -41,12 +43,20 @@ class _MainScreenState extends State<MainScreen> {
 
   // A simple disconnect method to show in the AppBar
   void _disconnect() {
+    _radioController.dispose();
     widget.connection.dispose();
     // Navigate back to the connection screen
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const ConnectionScreen()),
       (Route<dynamic> route) => false,
     );
+  }
+
+  @override
+  void dispose() {
+    // Defensive: dispose RadioController here if not already
+    _radioController.dispose();
+    super.dispose();
   }
 
   @override

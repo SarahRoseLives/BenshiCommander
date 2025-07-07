@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import '../benshi/radio_controller.dart';
 
 class DashboardView extends StatelessWidget {
-  final BluetoothConnection connection;
-  const DashboardView({Key? key, required this.connection}) : super(key: key);
+  final RadioController radioController;
+  const DashboardView({Key? key, required this.radioController}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {

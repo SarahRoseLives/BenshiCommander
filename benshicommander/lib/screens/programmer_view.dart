@@ -4,15 +4,14 @@ import '../benshi/radio_controller.dart';
 import '../services/chirp_exporter.dart';
 
 class ProgrammerView extends StatefulWidget {
-  final BluetoothConnection connection;
-  const ProgrammerView({Key? key, required this.connection}) : super(key: key);
+  final RadioController radioController;
+  const ProgrammerView({Key? key, required this.radioController}) : super(key: key);
 
   @override
   _ProgrammerViewState createState() => _ProgrammerViewState();
 }
 
 class _ProgrammerViewState extends State<ProgrammerView> {
-  late final RadioController _radioController;
   late final ChirpExporter _chirpExporter;
 
   String _statusMessage = 'Press "Start Server" to begin the Chirp export process.';
@@ -20,9 +19,8 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   @override
   void initState() {
     super.initState();
-    _radioController = RadioController(connection: widget.connection);
     _chirpExporter = ChirpExporter(
-      radioController: _radioController,
+      radioController: widget.radioController,
       onStatusUpdate: (message) {
         if (mounted) {
           setState(() {
@@ -36,7 +34,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   @override
   void dispose() {
     _chirpExporter.stop();
-    _radioController.dispose();
+    // DO NOT dispose the radioController here! Parent manages it.
     super.dispose();
   }
 

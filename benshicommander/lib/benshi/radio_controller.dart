@@ -2,128 +2,248 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
-import 'protocol.dart';
+import 'protocol/protocol.dart';
 
-class RadioController {
-  final BluetoothConnection connection;
+// --- State Holder Classes ---
+class RadioStatus {
+  bool isPowerOn = true; // Assume ON if connected
+  bool isInTx = false;
+  bool isInRx = false;
+  double rssi = 0;
+  bool isSq = false;
+  bool isScan = false;
+  String doubleChannel = "OFF";
+  int currChId = 0;
+  bool isGpsLocked = false;
+  bool isHfpConnected = false;
+
+  void updateFrom(StatusExt status) {
+    isPowerOn = status.isPowerOn;
+    isInTx = status.isInTx;
+    isInRx = status.isInRx;
+    rssi = status.rssi;
+    isSq = status.isSq;
+    isScan = status.isScan;
+    doubleChannel = status.doubleChannel.name;
+    currChId = status.currChId;
+    isGpsLocked = status.isGpsLocked;
+    isHfpConnected = status.isHfpConnected;
+  }
+}
+
+class RadioChannelInfo {
+  String name = "Loading...";
+  double rxFreq = 0.0;
+  double txFreq = 0.0;
+  String bandwidth = "WIDE";
+  String txPower = "Low";
+  String rxTone = "None";
+  String txTone = "None";
+
+  void updateFrom(Channel channel) {
+    name = channel.name;
+    rxFreq = channel.rxFreq;
+    txFreq = channel.txFreq;
+    bandwidth = channel.bandwidth;
+    txPower = channel.txPower;
+    rxTone = channel.rxTone;
+    txTone = channel.txTone;
+  }
+}
+
+class RadioGpsData {
+  double latitude = 0.0;
+  double longitude = 0.0;
+  int speed = 0;
+  int heading = 0;
+  int altitude = 0;
+  int accuracy = 0;
+  DateTime time = DateTime.now().toUtc();
+
+  void updateFrom(Position position) {
+    latitude = position.latitude;
+    longitude = position.longitude;
+    speed = position.speed ?? 0;
+    heading = position.heading ?? 0;
+    altitude = position.altitude ?? 0;
+    accuracy = position.accuracy;
+    time = position.time;
+  }
+}
+
+class RadioDeviceInfo {
+  String vendorId = "Unknown";
+  String productId = "Unknown";
+  String hardwareVersion = "N/A";
+  String firmwareVersion = "N/A";
+  int channelCount = 0;
+
+  void updateFrom(DeviceInfo info) {
+    vendorId = info.vendorId;
+    productId = info.productId;
+    hardwareVersion = info.hwVer;
+    firmwareVersion = info.softVer;
+    channelCount = info.channelCount;
+  }
+}
+
+class RadioController extends ChangeNotifier {
+  final BluetoothConnection? connection;
   final StreamController<Message> _messageStreamController = StreamController<Message>.broadcast();
-  late StreamSubscription _btStreamSubscription;
-  Uint8List _rxBuffer = Uint8List(0); // Buffer for incoming data
+  StreamSubscription? _btStreamSubscription;
+  Uint8List _rxBuffer = Uint8List(0);
 
-  RadioController({required this.connection}) {
-    _btStreamSubscription = connection.input!.listen((Uint8List data) {
-      _rxBuffer = Uint8List.fromList([..._rxBuffer, ...data]); // Append new data to buffer
+  // State objects
+  final RadioStatus status = RadioStatus();
+  final RadioChannelInfo channelInfo = RadioChannelInfo();
+  final RadioGpsData gps = RadioGpsData();
+  final RadioDeviceInfo deviceInfo = RadioDeviceInfo();
+  double batteryVoltage = 0.0;
+  int batteryLevelAsPercentage = 0;
 
-      while (true) {
-        // Try to parse a frame from the buffer
-        final result = _parseGaiaFrameFromBuffer();
-        if (result == null) {
-          break; // Not enough data for a full frame, wait for more
-        }
+  // UI Getters
+  bool get isPowerOn => status.isPowerOn;
+  bool get isInTx => status.isInTx;
+  bool get isInRx => status.isInRx;
+  double get rssi => status.rssi;
+  bool get isSq => status.isSq;
+  bool get isScan => status.isScan;
+  String get doubleChannel => status.doubleChannel;
+  int get currChId => status.currChId;
+  bool get isGpsLocked => status.isGpsLocked;
+  bool get isHfpConnected => status.isHfpConnected;
+  String get name => channelInfo.name;
+  double get rxFreq => channelInfo.rxFreq;
+  double get txFreq => channelInfo.txFreq;
+  String get bandwidth => channelInfo.bandwidth;
+  String get txPower => channelInfo.txPower;
+  String get rxTone => channelInfo.rxTone;
+  String get txTone => channelInfo.txTone;
+  double get latitude => gps.latitude;
+  double get longitude => gps.longitude;
+  int get speed => gps.speed;
+  int get heading => gps.heading;
+  int get altitude => gps.altitude;
+  int get accuracy => gps.accuracy;
+  DateTime get time => gps.time;
+  String get vendorId => deviceInfo.vendorId;
+  String get productId => deviceInfo.productId;
+  String get hardwareVersion => deviceInfo.hardwareVersion;
+  String get firmwareVersion => deviceInfo.firmwareVersion;
 
-        // A frame was successfully parsed, update the buffer with the remainder
-        _rxBuffer = result.remainingBuffer;
-        final frame = result.frame;
+  int get squelchLevel => 2;
+  int get micGain => 5;
+  int get btMicGain => 7;
 
-        if (kDebugMode) {
-          print('Radio RX (raw Gaia payload): ${frame.messageBytes.map((c) => c.toRadixString(16).padLeft(2, '0')).join(' ')}');
-        }
-
-        try {
-          // Parse the message from the frame's payload
-          final message = Message.fromBytes(frame.messageBytes);
-          if (kDebugMode) {
-            print('Radio RX (parsed): '
-                'cmdGroup=${message.commandGroup}, '
-                'isReply=${message.isReply}, '
-                'command=${message.command}, '
-                'body=${message.body}');
-          }
-          _messageStreamController.add(message);
-        } catch (e) {
-          if (kDebugMode) {
-            print('Error parsing message from Gaia frame: $e');
-          }
-        }
-      }
-    });
+  RadioController({this.connection}) {
+    if (connection != null) {
+      _btStreamSubscription = connection!.input!.listen(_onDataReceived);
+      _initializeRadioState();
+    }
   }
 
-  /// Parses a single GaiaFrame from the _rxBuffer.
-  /// Returns a result object if successful, otherwise null.
+  void _onDataReceived(Uint8List data) {
+    _rxBuffer = Uint8List.fromList([..._rxBuffer, ...data]);
+    while (true) {
+      final result = _parseGaiaFrameFromBuffer();
+      if (result == null) break;
+
+      _rxBuffer = result.remainingBuffer;
+      try {
+        final message = Message.fromBytes(result.frame.messageBytes);
+
+        if (message.command == BasicCommand.EVENT_NOTIFICATION && message.body is EventNotificationBody) {
+            _handleEvent(message.body as EventNotificationBody);
+        } else {
+            _messageStreamController.add(message);
+        }
+
+      } catch (e) {
+        if (kDebugMode) print('Error parsing message: $e');
+      }
+    }
+  }
+
+  void _handleEvent(EventNotificationBody eventBody) {
+      if (eventBody.eventType == EventType.HT_STATUS_CHANGED) {
+          final statusReply = eventBody.event as GetHtStatusReplyBody;
+          if (statusReply.status != null) {
+              status.updateFrom(statusReply.status!);
+              if (status.currChId != channelInfo.name.hashCode) { // Simple check to see if channel changed
+                getChannel(status.currChId).then((ch) {
+                    channelInfo.updateFrom(ch);
+                    notifyListeners();
+                });
+              } else {
+                notifyListeners();
+              }
+          }
+      }
+  }
+
+  Future<void> _initializeRadioState() async {
+    try {
+      await _registerForEvents();
+
+      final results = await Future.wait([
+        getDeviceInfo(),
+        getStatus(),
+        getBatteryPercentage(),
+        getBatteryVoltage(),
+        getPosition(),
+      ]);
+
+      deviceInfo.updateFrom(results[0] as DeviceInfo);
+      status.updateFrom(results[1] as StatusExt);
+      batteryLevelAsPercentage = (results[2] as num).toInt();
+      batteryVoltage = (results[3] as num).toDouble();
+      gps.updateFrom(results[4] as Position);
+
+      final currentChannel = await getChannel(status.currChId);
+      channelInfo.updateFrom(currentChannel);
+    } catch (e) {
+      if (kDebugMode) print('Error initializing radio state: $e');
+    } finally {
+      notifyListeners();
+    }
+  }
+
   GaiaParseResult? _parseGaiaFrameFromBuffer() {
-    // Find the start of a potential frame
     int frameStart = _rxBuffer.indexOf(GaiaFrame.startByte);
     if (frameStart == -1) {
-      // No start byte, can't proceed. Clear buffer to avoid infinite loops on garbage data.
       _rxBuffer = Uint8List(0);
       return null;
     }
-
-    // Discard any data before the start byte
-    if (frameStart > 0) {
-      _rxBuffer = _rxBuffer.sublist(frameStart);
-    }
-
-    // A GAIA frame needs at least 4 bytes for its header
-    if (_rxBuffer.length < 4) {
-      return null; // Not enough data for header
-    }
-
-    // Check version byte
+    if (frameStart > 0) _rxBuffer = _rxBuffer.sublist(frameStart);
+    if (_rxBuffer.length < 4) return null;
     if (_rxBuffer[1] != GaiaFrame.version) {
-       // Invalid version, discard the start byte and try again
       _rxBuffer = _rxBuffer.sublist(1);
       return null;
     }
-
-    // The length of the inner message's payload (not including its 4-byte header)
     final messagePayloadLength = _rxBuffer[3];
-    // The length of the full inner message (header + payload)
     final fullMessageLength = messagePayloadLength + 4;
-    // The length of the entire GAIA frame (GAIA header + full message)
     final fullFrameLength = fullMessageLength + 4;
-
-    if (_rxBuffer.length < fullFrameLength) {
-      return null; // Not enough data for the full frame
-    }
-
+    if (_rxBuffer.length < fullFrameLength) return null;
     final messageBytes = _rxBuffer.sublist(4, fullFrameLength);
     final frame = GaiaFrame(flags: _rxBuffer[2], messageBytes: messageBytes);
     final remainingBuffer = _rxBuffer.sublist(fullFrameLength);
-
     return GaiaParseResult(frame, remainingBuffer);
   }
 
-  // MODIFIED: This function now wraps the command in a GaiaFrame.
   Future<void> _sendCommand(Message command) async {
     final messageBytes = command.toBytes();
     final gaiaFrame = GaiaFrame(messageBytes: messageBytes);
     final bytes = gaiaFrame.toBytes();
-
-    // Debug log to see all outgoing data
-    if (kDebugMode) {
-      print('Radio TX (raw): ${bytes.map((c) => c.toRadixString(16).padLeft(2, '0')).join(' ')}');
-      print('Radio TX (parsed): '
-          'cmdGroup=${command.commandGroup}, '
-          'isReply=${command.isReply}, '
-          'command=${command.command}, '
-          'body=${command.body}');
-    }
-    connection.output.add(bytes);
-    await connection.output.allSent;
+    connection?.output.add(bytes);
+    await connection?.output.allSent;
   }
 
-  // --- The rest of your RadioController class is unchanged ---
-  // _sendCommandExpectReply, getDeviceInfo, getChannel, getAllChannels, dispose
   Future<T> _sendCommandExpectReply<T extends MessageBody>({
     required Message command,
     required BasicCommand replyCommand,
-    // Increased timeout for more reliability
     Duration timeout = const Duration(seconds: 10),
   }) async {
     final completer = Completer<T>();
-
     late StreamSubscription streamSub;
     streamSub = _messageStreamController.stream.listen((message) {
       if (message.command == replyCommand && message.isReply) {
@@ -133,78 +253,107 @@ class RadioController {
         }
       }
     });
-
     await _sendCommand(command);
-
-    // Timeout logic
     Future.delayed(timeout, () {
       if (!completer.isCompleted) {
-        completer.completeError(TimeoutException('Radio did not reply in time for command ${command.command.name}.'));
+        completer.completeError(TimeoutException('Radio did not reply in time.'));
         streamSub.cancel();
       }
     });
-
     return completer.future;
   }
 
-  Future<DeviceInfo> getDeviceInfo() async {
-    final command = Message(
-      commandGroup: CommandGroup.BASIC,
-      command: BasicCommand.GET_DEV_INFO,
-      isReply: false,
-      body: GetDevInfoBody(),
-    );
+  Future<void> _registerForEvents() async {
+      final command = Message(
+          commandGroup: CommandGroup.BASIC,
+          command: BasicCommand.REGISTER_NOTIFICATION,
+          isReply: false,
+          body: RegisterNotificationBody(eventType: EventType.HT_STATUS_CHANGED)
+      );
+      await _sendCommand(command);
+  }
 
+  Future<DeviceInfo> getDeviceInfo() async {
     final reply = await _sendCommandExpectReply<GetDevInfoReplyBody>(
-      command: command,
+      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.GET_DEV_INFO, isReply: false, body: GetDevInfoBody()),
       replyCommand: BasicCommand.GET_DEV_INFO,
     );
-
-    if (reply.devInfo == null) {
-      throw Exception('Failed to get device info.');
-    }
+    if (reply.devInfo == null) throw Exception('Failed to get device info.');
+    deviceInfo.updateFrom(reply.devInfo!);
+    notifyListeners();
     return reply.devInfo!;
   }
 
-  Future<Channel> getChannel(int channelId) async {
-    final command = Message(
-      commandGroup: CommandGroup.BASIC,
-      command: BasicCommand.READ_RF_CH,
-      isReply: false,
-      body: ReadRFChBody(channelId: channelId),
-    );
+  Future<StatusExt> getStatus() async {
+      final reply = await _sendCommandExpectReply<GetHtStatusReplyBody>(
+          command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.GET_HT_STATUS, isReply: false, body: GetHtStatusBody()),
+          replyCommand: BasicCommand.GET_HT_STATUS,
+      );
+      if(reply.status == null) throw Exception('Failed to get status');
+      return reply.status!;
+  }
 
+  Future<num> getBatteryVoltage() async {
+      final reply = await _sendCommandExpectReply<ReadPowerStatusReplyBody>(
+          command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_STATUS, isReply: false, body: ReadPowerStatusBody(statusType: PowerStatusType.BATTERY_VOLTAGE)),
+          replyCommand: BasicCommand.READ_STATUS,
+      );
+      if (reply.value == null) throw Exception('Failed to get battery voltage.');
+      return reply.value!;
+  }
+
+  Future<num> getBatteryPercentage() async {
+      final reply = await _sendCommandExpectReply<ReadPowerStatusReplyBody>(
+          command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_STATUS, isReply: false, body: ReadPowerStatusBody(statusType: PowerStatusType.BATTERY_LEVEL_AS_PERCENTAGE)),
+          replyCommand: BasicCommand.READ_STATUS,
+      );
+      if (reply.value == null) throw Exception('Failed to get battery percentage.');
+      return reply.value!;
+  }
+
+  Future<Position> getPosition() async {
+      final reply = await _sendCommandExpectReply<GetPositionReplyBody>(
+          command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.GET_POSITION, isReply: false, body: GetPositionBody()),
+          replyCommand: BasicCommand.GET_POSITION,
+      );
+      if (reply.position == null) throw Exception('Failed to get position.');
+      return reply.position!;
+  }
+
+  Future<Channel> getChannel(int channelId) async {
     final reply = await _sendCommandExpectReply<ReadRFChReplyBody>(
-      command: command,
+      command: Message(commandGroup: CommandGroup.BASIC, command: BasicCommand.READ_RF_CH, isReply: false, body: ReadRFChBody(channelId: channelId)),
       replyCommand: BasicCommand.READ_RF_CH,
     );
-
-    if (reply.rfCh == null) {
-      throw Exception('Failed to get channel $channelId.');
-    }
+    if (reply.rfCh == null) throw Exception('Failed to get channel $channelId.');
     return reply.rfCh!;
   }
 
+  /// Re-added method for Chirp compatibility
   Future<List<Channel>> getAllChannels() async {
-    final deviceInfo = await getDeviceInfo();
+    if (deviceInfo.channelCount == 0) {
+      // Make sure we have device info first
+      await getDeviceInfo();
+    }
     final channels = <Channel>[];
     for (int i = 0; i < deviceInfo.channelCount; i++) {
       try {
         final channel = await getChannel(i);
         channels.add(channel);
-        // Small delay between requests to not overwhelm the radio
         await Future.delayed(const Duration(milliseconds: 50));
       } catch (e) {
-        if (kDebugMode) {
-          print('Failed to get channel $i: $e');
-        }
+        if (kDebugMode) print('Failed to get channel $i: $e');
       }
     }
     return channels;
   }
 
+  @override
   void dispose() {
-    _btStreamSubscription.cancel();
+    _btStreamSubscription?.cancel();
     _messageStreamController.close();
+    super.dispose();
   }
+
+  static RadioController fakeForUi() => RadioController(connection: null);
 }

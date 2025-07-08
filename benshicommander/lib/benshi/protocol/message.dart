@@ -78,7 +78,13 @@ class Message {
           parsedBody = EventNotificationBody.fromBytes(bodyBytes);
           break;
         case BasicCommand.REGISTER_NOTIFICATION:
-           parsedBody = RegisterNotificationBody(eventType: EventType.fromInt(bodyBytes[0]));
+          parsedBody = RegisterNotificationBody(eventType: EventType.fromInt(bodyBytes[0]));
+          break;
+        case BasicCommand.GET_IN_SCAN:
+          parsedBody = isReply ? GetInScanReplyBody.fromBytes(bodyBytes) : GetInScanBody();
+          break;
+        case BasicCommand.SET_IN_SCAN:
+          parsedBody = isReply ? SetInScanReplyBody.fromBytes(bodyBytes) : SetInScanBody(enable: bodyBytes[0] > 0);
           break;
         default:
           parsedBody = UnknownBody(data: bodyBytes);

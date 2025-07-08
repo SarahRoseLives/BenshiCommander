@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'about_screen.dart';
 import 'main_screen.dart';
 
 class ConnectionScreen extends StatefulWidget {
@@ -35,9 +36,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
         statuses[Permission.bluetoothConnect]!.isGranted) {
       _getPairedDevices();
     } else {
-      if(mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Permissions not granted. Cannot scan for devices.')),
+          const SnackBar(
+              content: Text('Permissions not granted. Cannot scan for devices.')),
         );
       }
     }
@@ -45,12 +47,13 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
   void _getPairedDevices() async {
     try {
-      List<BluetoothDevice> devices = await FlutterBluetoothSerial.instance.getBondedDevices();
+      List<BluetoothDevice> devices =
+          await FlutterBluetoothSerial.instance.getBondedDevices();
       setState(() {
         _devicesList = devices;
       });
     } catch (e) {
-      if(mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error getting paired devices: $e')),
         );
@@ -71,20 +74,20 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     });
 
     try {
-      BluetoothConnection connection = await BluetoothConnection.toAddress(_selectedDevice!.address);
+      BluetoothConnection connection =
+          await BluetoothConnection.toAddress(_selectedDevice!.address);
 
       // If connection is successful, navigate to the MainScreen
       // and replace the current screen so the user can't go "back" to it.
-      if(mounted) {
+      if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) => MainScreen(connection: connection),
           ),
         );
       }
-
     } catch (e) {
-      if(mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to connect: $e')),
         );
@@ -100,6 +103,20 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Connect to Radio'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'About',
+            onPressed: () {
+              // Navigate to the AboutScreen, allowing the user to return
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const AboutScreen(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -126,8 +143,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               value: _selectedDevice,
               decoration: InputDecoration(
                 labelText: 'Paired Devices',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               isExpanded: true,
             ),
@@ -138,7 +157,8 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                   ? const SizedBox(
                       height: 20,
                       width: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3.0),
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 3.0),
                     )
                   : const Text('Connect'),
             ),

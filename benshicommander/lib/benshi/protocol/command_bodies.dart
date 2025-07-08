@@ -269,3 +269,52 @@ class RegisterNotificationBody extends MessageBody {
   @override
   Uint8List toBytes() => Uint8List.fromList([eventType.value]);
 }
+
+// --- GET_IN_SCAN ---
+class GetInScanBody extends MessageBody {
+  @override
+  Uint8List toBytes() => Uint8List(0);
+}
+
+class GetInScanReplyBody extends ReplyBody {
+  final bool isScanning;
+  GetInScanReplyBody({required super.replyStatus, this.isScanning = false});
+
+  factory GetInScanReplyBody.fromBytes(Uint8List bytes) {
+    final r = ByteReader(bytes);
+    final status = ReplyStatus.fromInt(r.readInt(8));
+    return GetInScanReplyBody(
+      replyStatus: status,
+      // The reply body is a single boolean
+      isScanning: status == ReplyStatus.SUCCESS ? r.readBool() : false,
+    );
+  }
+  @override
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
+}
+
+// --- SET_IN_SCAN ---
+class SetInScanBody extends MessageBody {
+  final bool enable;
+  SetInScanBody({required this.enable});
+
+  @override
+  Uint8List toBytes() {
+    final w = ByteWriter(1);
+    w.writeBool(enable);
+    return w.toBytes();
+  }
+}
+
+class SetInScanReplyBody extends ReplyBody {
+  SetInScanReplyBody({required super.replyStatus});
+
+  factory SetInScanReplyBody.fromBytes(Uint8List bytes) {
+    return SetInScanReplyBody(
+      replyStatus: ReplyStatus.fromInt(ByteReader(bytes).readInt(8))
+    );
+  }
+
+  @override
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
+}

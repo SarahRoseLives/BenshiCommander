@@ -12,243 +12,204 @@ class ScannerView extends StatefulWidget {
 }
 
 class _ScannerViewState extends State<ScannerView> {
-  // UI state for scanning logic
-  bool _isScanning = false;
-  double _scanDisplayFreq = 0.0;
-  bool scanHold = false;
-
-  // Settings for the scanner
-  final TextEditingController scanStartController = TextEditingController(text: "144.000");
-  final TextEditingController scanEndController = TextEditingController(text: "148.000");
-  int scanStepkHz = 5;
+  // State for the channel list
+  List<Channel>? _channels;
+  bool _isLoading = true;
+  String _statusMessage = '';
 
   @override
   void initState() {
     super.initState();
-    // Set initial display frequency from the controller
-    _updateDisplayFreq(widget.radioController.currentRxFreq);
-    // Listen for updates from the radio controller
+    // Listen for updates from the radio (like status changes)
     widget.radioController.addListener(_onRadioUpdate);
+    // Load all channels for the scan list display
+    _loadAllChannels();
   }
 
   @override
   void dispose() {
-    // Stop scanning if the view is destroyed
-    _isScanning = false;
     widget.radioController.removeListener(_onRadioUpdate);
-    scanStartController.dispose();
-    scanEndController.dispose();
     super.dispose();
   }
 
   void _onRadioUpdate() {
-    // When the radio controller gets an event (e.g., squelch changed),
-    // this will trigger a rebuild if the widget is still mounted.
+    // A status change from the radio (e.g. `isScan` toggled, current channel changed)
+    // will trigger a rebuild to update the UI.
     if (mounted) {
-      // If not scanning, update the display frequency to the radio's current channel
-      if (!_isScanning) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _loadAllChannels() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Reading all channels from radio...';
+    });
+    try {
+      final channels = await widget.radioController.getAllChannels();
+      if (mounted) {
         setState(() {
-           _scanDisplayFreq = widget.radioController.currentRxFreq;
+          _channels = channels;
+          _isLoading = false;
+          _statusMessage = '';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Error loading channels: $e';
         });
       }
     }
   }
 
-  void _updateDisplayFreq(double freq) {
-    if (mounted) {
-      setState(() {
-        _scanDisplayFreq = freq;
-      });
+  Future<void> _toggleMasterScan() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      // Toggle the radio's scan state based on its current state
+      await widget.radioController.setRadioScan(!widget.radioController.isScan);
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _toggleScan() async {
-    if (_isScanning) {
+  Future<void> _toggleChannelInScanList(Channel channel, bool includeInScan) async {
+    try {
+      final updatedChannel = channel.copyWith(scan: includeInScan);
+      await widget.radioController.writeChannel(updatedChannel);
+      // Update local state to immediately reflect the change
       setState(() {
-        _isScanning = false;
+        final index = _channels?.indexWhere((c) => c.channelId == channel.channelId);
+        if (index != null && index != -1) {
+          _channels![index] = updatedChannel;
+        }
       });
-      return;
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error updating channel ${channel.channelId}: $e")));
     }
-
-    setState(() {
-      _isScanning = true;
-    });
-
-    // Parse scan parameters from text fields
-    double startFreq = double.tryParse(scanStartController.text) ?? 144.0;
-    double endFreq = double.tryParse(scanEndController.text) ?? 148.0;
-    double stepFreq = scanStepkHz / 1000.0;
-    double currentScanFreq = startFreq;
-
-    // The main scanning loop
-    while (_isScanning) {
-      if (!mounted) return;
-
-      _updateDisplayFreq(currentScanFreq);
-      await widget.radioController.setVfoFrequency(currentScanFreq);
-
-      // Short delay to allow radio to tune and update status
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      // Check for signal and hold if necessary
-      if (widget.radioController.isSq && !scanHold) {
-        // Signal detected, hold here for a couple of seconds or until signal drops
-        await Future.delayed(const Duration(seconds: 2));
-        continue; // Re-check the same frequency
-      }
-
-      // If holding, just loop without incrementing frequency
-      if(scanHold) {
-        await Future.delayed(const Duration(milliseconds: 200));
-        continue;
-      }
-
-      // No signal or not holding, move to the next frequency
-      currentScanFreq += stepFreq;
-      if (currentScanFreq > endFreq) {
-        currentScanFreq = startFreq; // Loop back to the beginning
-      }
-    }
-     // After scan stops, set the display back to the actual current channel frequency
-    _updateDisplayFreq(widget.radioController.currentRxFreq);
   }
-
 
   @override
   Widget build(BuildContext context) {
     final radio = widget.radioController;
+    final bool isScanning = radio.isScan;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-             // --- Top Display ---
-            Card(
-              elevation: 2,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    Text('FREQUENCY', style: Theme.of(context).textTheme.labelLarge),
-                    Text(
-                      '${_scanDisplayFreq.toStringAsFixed(4)} MHz',
-                      style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildLedIndicator(radio.isInRx && radio.isSq, 'RX', Colors.green),
-                        _buildLedIndicator(_isScanning, 'SCAN', Colors.blue),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Signal Strength'),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: LinearProgressIndicator(
-                        value: radio.rssi / 100.0,
-                        minHeight: 12,
-                        color: Colors.green,
-                        backgroundColor: Colors.grey[300],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            // --- Scan Controls ---
-            Card(
-              elevation: 2,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton.icon(
-                          icon: Icon(_isScanning ? Icons.stop : Icons.play_arrow),
-                          label: Text(_isScanning ? 'Stop Scan' : 'Start Scan'),
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: _isScanning ? Colors.red : Colors.green),
-                          onPressed: _toggleScan,
-                        ),
-                        const SizedBox(width: 12),
-                        ElevatedButton.icon(
-                          icon: Icon(scanHold ? Icons.play_arrow : Icons.pause),
-                          label: Text(scanHold ? 'Resume' : 'Hold'),
-                          onPressed: _isScanning
-                              ? () {
-                                  setState(() => scanHold = !scanHold);
-                                }
-                              : null,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: scanStartController,
-                            decoration: const InputDecoration(labelText: 'Start (MHz)', border: OutlineInputBorder()),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: scanEndController,
-                            decoration: const InputDecoration(labelText: 'End (MHz)', border: OutlineInputBorder()),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          ),
-                        ),
-                      ],
-                    ),
-                     const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text('Step:'),
-                        const SizedBox(width: 8),
-                        DropdownButton<int>(
-                          value: scanStepkHz,
-                          items: const [
-                            DropdownMenuItem(value: 5, child: Text('5 kHz')),
-                            DropdownMenuItem(value: 10, child: Text('10 kHz')),
-                            DropdownMenuItem(value: 12, child: Text('12.5 kHz')),
-                            DropdownMenuItem(value: 25, child: Text('25 kHz')),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) setState(() => scanStepkHz = v);
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+    return Column(
+      children: [
+        // --- Top Control Panel ---
+        _buildControlPanel(isScanning, radio),
+        const Divider(height: 1),
+        // --- Channel List ---
+        Expanded(
+          child: _isLoading && _channels == null
+              ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(), const SizedBox(height: 16), Text(_statusMessage)]))
+              : _buildChannelList(),
         ),
+      ],
+    );
+  }
+
+  Widget _buildControlPanel(bool isScanning, RadioController radio) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+                label: Text(isScanning ? 'Stop Memory Scan' : 'Start Memory Scan'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isScanning ? Colors.redAccent : Colors.green,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  textStyle: const TextStyle(fontSize: 16),
+                ),
+                onPressed: _toggleMasterScan,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // --- Status Indicators ---
+          Wrap(
+            spacing: 24,
+            runSpacing: 12,
+            alignment: WrapAlignment.center,
+            children: [
+              _buildStatusIndicator(
+                  Icons.track_changes,
+                  isScanning ? 'SCANNING' : 'IDLE',
+                  isScanning ? Colors.orange : Colors.grey),
+              _buildStatusIndicator(
+                  Icons.sensors,
+                  radio.isInRx ? radio.currentChannelName : '...',
+                  radio.isInRx ? Colors.green : Colors.grey),
+              _buildStatusIndicator(
+                  Icons.sensors_off,
+                  radio.isSq ? 'SIGNAL DETECTED' : 'SQUELCH CLOSED',
+                  radio.isSq ? Colors.green : Colors.grey),
+            ],
+          )
+        ],
       ),
     );
   }
 
-  Widget _buildLedIndicator(bool active, String label, Color color) {
-    return Column(
-      children: [
-        Icon(Icons.circle,
-            color: active ? color : Colors.grey[400], size: 24),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 14)),
-      ],
+  Widget _buildStatusIndicator(IconData icon, String text, Color color) {
+    return Chip(
+      avatar: Icon(icon, color: color, size: 18),
+      label: Text(text),
+      backgroundColor: color.withOpacity(0.1),
+      labelStyle: TextStyle(color: color, fontWeight: FontWeight.bold),
+    );
+  }
+
+  Widget _buildChannelList() {
+    if (_channels == null || _channels!.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.list_alt, size: 60, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text(_statusMessage.isNotEmpty ? _statusMessage : 'No channels found.'),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: _loadAllChannels, child: const Text('Reload Channels')),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAllChannels,
+      child: ListView.builder(
+        itemCount: _channels!.length,
+        itemBuilder: (context, index) {
+          final channel = _channels![index];
+          final bool isCurrent = channel.channelId == widget.radioController.currentChannelId && (widget.radioController.isInRx || widget.radioController.isScan);
+          return ListTile(
+            selected: isCurrent,
+            selectedTileColor: Colors.green.withOpacity(0.15),
+            leading: CircleAvatar(
+              backgroundColor: isCurrent ? Colors.green : Colors.blueGrey,
+              foregroundColor: Colors.white,
+              child: Text((channel.channelId + 1).toString()),
+            ),
+            title: Text(channel.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text("${channel.rxFreq.toStringAsFixed(4)} MHz"),
+            trailing: Switch(
+              value: channel.scan,
+              onChanged: (newValue) => _toggleChannelInScanList(channel, newValue),
+              activeColor: Colors.green,
+            ),
+          );
+        },
+      ),
     );
   }
 }

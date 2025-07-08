@@ -18,6 +18,7 @@ enum BasicCommand {
   WRITE_SETTINGS(11),
   READ_RF_CH(13),
   WRITE_RF_CH(14),
+  GET_IN_SCAN(15), // Add this command
   SET_IN_SCAN(16),
   GET_HT_STATUS(20),
   SET_POSITION(32),

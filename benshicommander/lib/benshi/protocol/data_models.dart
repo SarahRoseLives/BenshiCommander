@@ -515,14 +515,48 @@ class Channel {
   }
 }
 
+// FULLY IMPLEMENTED SETTINGS MODEL
 class Settings {
+  // All fields from the protocol are now included.
   final int channelA;
   final int channelB;
   final bool scan;
+  final int aghfpCallMode;
+  final int doubleChannel;
   final int squelchLevel;
+  final bool tailElim;
+  final bool autoRelayEn;
+  final bool autoPowerOn;
+  final bool keepAghfpLink;
   final int micGain;
+  final int txHoldTime;
+  final int txTimeLimit;
+  final int localSpeaker;
   final int btMicGain;
-  final bool supportsVfo; // Simplified for UI
+  final bool adaptiveResponse;
+  final bool disTone;
+  final bool powerSavingMode;
+  final int autoPowerOff;
+  final dynamic autoShareLocCh; // int or 'current'
+  final int hmSpeaker;
+  final int positioningSystem;
+  final int timeOffset;
+  final bool useFreqRange2;
+  final bool pttLock;
+  final bool leadingSyncBitEn;
+  final bool pairingAtPowerOn;
+  final int screenTimeout;
+  final int vfoX;
+  final bool imperialUnit;
+  final int wxMode;
+  final int noaaCh;
+  final int vfolTxPowerX;
+  final int vfo2TxPowerX;
+  final bool disDigitalMute;
+  final bool signalingEccEn;
+  final bool chDataLock;
+  final int vfo1ModFreqX;
+  final int vfo2ModFreqX;
 
   Settings({
     required this.channelA,
@@ -531,47 +565,222 @@ class Settings {
     required this.squelchLevel,
     required this.micGain,
     required this.btMicGain,
-    required this.supportsVfo,
+    required this.vfoX,
+    // Add defaults for all other fields to avoid breaking constructor calls
+    this.aghfpCallMode = 0,
+    this.doubleChannel = 0,
+    this.tailElim = false,
+    this.autoRelayEn = false,
+    this.autoPowerOn = false,
+    this.keepAghfpLink = false,
+    this.txHoldTime = 0,
+    this.txTimeLimit = 0,
+    this.localSpeaker = 0,
+    this.adaptiveResponse = false,
+    this.disTone = false,
+    this.powerSavingMode = false,
+    this.autoPowerOff = 0,
+    this.autoShareLocCh = 'current',
+    this.hmSpeaker = 0,
+    this.positioningSystem = 0,
+    this.timeOffset = 0,
+    this.useFreqRange2 = false,
+    this.pttLock = false,
+    this.leadingSyncBitEn = false,
+    this.pairingAtPowerOn = false,
+    this.screenTimeout = 0,
+    this.imperialUnit = false,
+    this.wxMode = 0,
+    this.noaaCh = 0,
+    this.vfolTxPowerX = 0,
+    this.vfo2TxPowerX = 0,
+    this.disDigitalMute = false,
+    this.signalingEccEn = false,
+    this.chDataLock = false,
+    this.vfo1ModFreqX = 0,
+    this.vfo2ModFreqX = 0,
   });
 
-  factory Settings.fromBytes(Uint8List bytes) {
-    final r = ByteReader(bytes);
-    final channelALower = r.readInt(4);
-    final channelBLower = r.readInt(4);
-    final scan = r.readBool();
-    r.skipBits(1); // aghfp_call_mode
-    r.skipBits(2); // double_channel
-    final squelchLevel = r.readInt(4);
-    r.skipBits(12);
-    final micGain = r.readInt(3);
-    r.skipBits(9);
-    final btMicGain = r.readInt(3);
-    r.skipBits(22);
-    final vfoX = r.readInt(2);
-    r.skipBits(1);
-    final channelAUpper = r.readInt(4);
-    final channelBUpper = r.readInt(4);
-    // This is a rough approximation, as true VFO support is in device info.
-    // This setting just determines which VFO is active if any.
-    final supportsVfo = vfoX > 0;
+factory Settings.fromBytes(Uint8List bytes) {
+  final r = ByteReader(bytes);
+  final channelALower = r.readInt(4);
+  final channelBLower = r.readInt(4);
 
-    return Settings(
-      channelA: (channelAUpper << 4) | channelALower,
-      channelB: (channelBUpper << 4) | channelBLower,
-      scan: scan,
-      squelchLevel: squelchLevel,
-      micGain: micGain,
-      btMicGain: btMicGain,
-      supportsVfo: supportsVfo,
-    );
+  final scan = r.readBool();
+  final aghfpCallMode = r.readInt(1);
+  final doubleChannel = r.readInt(2);
+  final squelchLevel = r.readInt(4);
+  final tailElim = r.readBool();
+  final autoRelayEn = r.readBool();
+  final autoPowerOn = r.readBool();
+  final keepAghfpLink = r.readBool();
+  final micGain = r.readInt(3);
+  final txHoldTime = r.readInt(4);
+  final txTimeLimit = r.readInt(5);
+  final localSpeaker = r.readInt(2);
+  final btMicGain = r.readInt(3);
+  final adaptiveResponse = r.readBool();
+  final disTone = r.readBool();
+  final powerSavingMode = r.readBool();
+  final autoPowerOff = r.readInt(3);
+  final autoShareLocCh = r.readInt(5);
+  final hmSpeaker = r.readInt(2);
+  final positioningSystem = r.readInt(4);
+  final timeOffset = r.readInt(6);
+  final useFreqRange2 = r.readBool();
+  final pttLock = r.readBool();
+  final leadingSyncBitEn = r.readBool();
+  final pairingAtPowerOn = r.readBool();
+  final screenTimeout = r.readInt(5);
+  final vfoX = r.readInt(2);
+  final imperialUnit = r.readBool();
+  final channelAUpper = r.readInt(4);
+  final channelBUpper = r.readInt(4);
+  final wxMode = r.readInt(2);
+  final noaaCh = r.readInt(4);
+  final vfolTxPowerX = r.readInt(2);
+  final vfo2TxPowerX = r.readInt(2);
+  final disDigitalMute = r.readBool();
+  final signalingEccEn = r.readBool();
+  final chDataLock = r.readBool();
+  r.skipBits(3); // padding
+  final vfo1ModFreqX = r.readInt(32);
+  final vfo2ModFreqX = r.readInt(32);
+
+  return Settings(
+    channelA: (channelAUpper << 4) | channelALower,
+    channelB: (channelBUpper << 4) | channelBLower,
+    scan: scan,
+    aghfpCallMode: aghfpCallMode,
+    doubleChannel: doubleChannel,
+    squelchLevel: squelchLevel,
+    tailElim: tailElim,
+    autoRelayEn: autoRelayEn,
+    autoPowerOn: autoPowerOn,
+    keepAghfpLink: keepAghfpLink,
+    micGain: micGain,
+    txHoldTime: txHoldTime,
+    txTimeLimit: txTimeLimit,
+    localSpeaker: localSpeaker,
+    btMicGain: btMicGain,
+    adaptiveResponse: adaptiveResponse,
+    disTone: disTone,
+    powerSavingMode: powerSavingMode,
+    autoPowerOff: autoPowerOff,
+    autoShareLocCh: autoShareLocCh,
+    hmSpeaker: hmSpeaker,
+    positioningSystem: positioningSystem,
+    timeOffset: timeOffset,
+    useFreqRange2: useFreqRange2,
+    pttLock: pttLock,
+    leadingSyncBitEn: leadingSyncBitEn,
+    pairingAtPowerOn: pairingAtPowerOn,
+    screenTimeout: screenTimeout,
+    vfoX: vfoX,
+    imperialUnit: imperialUnit,
+    wxMode: wxMode,
+    noaaCh: noaaCh,
+    vfolTxPowerX: vfolTxPowerX,
+    vfo2TxPowerX: vfo2TxPowerX,
+    disDigitalMute: disDigitalMute,
+    signalingEccEn: signalingEccEn,
+    chDataLock: chDataLock,
+    vfo1ModFreqX: vfo1ModFreqX,
+    vfo2ModFreqX: vfo2ModFreqX,
+  );
+}
+
+  // Fully implemented toBytes method
+  Uint8List toBytes() {
+    final w = ByteWriter(20); // Settings object is 20 bytes
+    w.writeInt(channelA & 0x0F, 4); // lower 4 bits
+    w.writeInt(channelB & 0x0F, 4); // lower 4 bits
+    w.writeBool(scan);
+    w.writeInt(aghfpCallMode, 1);
+    w.writeInt(doubleChannel, 2);
+    w.writeInt(squelchLevel, 4);
+    w.writeBool(tailElim);
+    w.writeBool(autoRelayEn);
+    w.writeBool(autoPowerOn);
+    w.writeBool(keepAghfpLink);
+    w.writeInt(micGain, 3);
+    w.writeInt(txHoldTime, 4);
+    w.writeInt(txTimeLimit, 5);
+    w.writeInt(localSpeaker, 2);
+    w.writeInt(btMicGain, 3);
+    w.writeBool(adaptiveResponse);
+    w.writeBool(disTone);
+    w.writeBool(powerSavingMode);
+    w.writeInt(autoPowerOff, 3);
+    w.writeInt(autoShareLocCh is int ? (autoShareLocCh as int) + 1 : 0, 5);
+    w.writeInt(hmSpeaker, 2);
+    w.writeInt(positioningSystem, 4);
+    w.writeInt(timeOffset, 6);
+    w.writeBool(useFreqRange2);
+    w.writeBool(pttLock);
+    w.writeBool(leadingSyncBitEn);
+    w.writeBool(pairingAtPowerOn);
+    w.writeInt(screenTimeout, 5);
+    w.writeInt(vfoX, 2);
+    w.writeBool(imperialUnit);
+    w.writeInt((channelA >> 4) & 0x0F, 4); // upper 4 bits
+    w.writeInt((channelB >> 4) & 0x0F, 4);
+    w.writeInt(wxMode, 2);
+    w.writeInt(noaaCh, 4);
+    w.writeInt(vfolTxPowerX, 2);
+    w.writeInt(vfo2TxPowerX, 2);
+    w.writeBool(disDigitalMute);
+    w.writeBool(signalingEccEn);
+    w.writeBool(chDataLock);
+    w.writeInt(0, 3); // padding
+    w.writeInt(vfo1ModFreqX, 32);
+    w.writeInt(vfo2ModFreqX, 32);
+    return w.toBytes();
   }
 
-  Uint8List toBytes() {
-    // This is a simplified implementation for demonstration.
-    // A full implementation would require tracking all fields.
-    final w = ByteWriter(20); // Correct size for full settings
-    // This would write all the fields back out. For now, it's not needed
-    // for scanner functionality, which is primarily read-only or simple sets.
-    return w.toBytes();
+  // Added copyWith method for easier state modification
+  Settings copyWith({ bool? scan }) {
+    return Settings(
+      scan: scan ?? this.scan,
+      // Copy all other properties from `this`
+      channelA: this.channelA,
+      channelB: this.channelB,
+      squelchLevel: this.squelchLevel,
+      micGain: this.micGain,
+      btMicGain: this.btMicGain,
+      vfoX: this.vfoX,
+      aghfpCallMode: this.aghfpCallMode,
+      doubleChannel: this.doubleChannel,
+      tailElim: this.tailElim,
+      autoRelayEn: this.autoRelayEn,
+      autoPowerOn: this.autoPowerOn,
+      keepAghfpLink: this.keepAghfpLink,
+      txHoldTime: this.txHoldTime,
+      txTimeLimit: this.txTimeLimit,
+      localSpeaker: this.localSpeaker,
+      adaptiveResponse: this.adaptiveResponse,
+      disTone: this.disTone,
+      powerSavingMode: this.powerSavingMode,
+      autoPowerOff: this.autoPowerOff,
+      autoShareLocCh: this.autoShareLocCh,
+      hmSpeaker: this.hmSpeaker,
+      positioningSystem: this.positioningSystem,
+      timeOffset: this.timeOffset,
+      useFreqRange2: this.useFreqRange2,
+      pttLock: this.pttLock,
+      leadingSyncBitEn: this.leadingSyncBitEn,
+      pairingAtPowerOn: this.pairingAtPowerOn,
+      screenTimeout: this.screenTimeout,
+      imperialUnit: this.imperialUnit,
+      wxMode: this.wxMode,
+      noaaCh: this.noaaCh,
+      vfolTxPowerX: this.vfolTxPowerX,
+      vfo2TxPowerX: this.vfo2TxPowerX,
+      disDigitalMute: this.disDigitalMute,
+      signalingEccEn: this.signalingEccEn,
+      chDataLock: this.chDataLock,
+      vfo1ModFreqX: this.vfo1ModFreqX,
+      vfo2ModFreqX: this.vfo2ModFreqX,
+    );
   }
 }

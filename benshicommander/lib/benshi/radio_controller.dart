@@ -372,6 +372,39 @@ class RadioController extends ChangeNotifier {
     }
   }
 
+  /// Enables or disables the radio's built-in memory channel scanning by writing to the main Settings block.
+  Future<void> setRadioScan(bool enable) async {
+    // 1. Ensure we have the latest settings from the radio.
+    if (settings == null) await getSettings();
+    if (settings == null) throw Exception("Could not load radio settings to modify them.");
+
+    // 2. Create a new settings object with the desired scan state.
+    final newSettings = settings!.copyWith(scan: enable);
+
+    // 3. Build and send the WRITE_SETTINGS command.
+    final reply = await _sendCommandExpectReply<WriteSettingsReplyBody>(
+      command: Message(
+        commandGroup: CommandGroup.BASIC,
+        command: BasicCommand.WRITE_SETTINGS,
+        isReply: false,
+        body: WriteSettingsBody(settings: newSettings),
+      ),
+      replyCommand: BasicCommand.WRITE_SETTINGS,
+    );
+
+    // 4. On success, update the local state and refresh radio status.
+    if (reply.replyStatus == ReplyStatus.SUCCESS) {
+      if (kDebugMode) {
+        print("Successfully sent WRITE_SETTINGS with scan: $enable");
+      }
+      settings = newSettings; // Update local copy of settings
+      await getStatus(); // Refresh status to get the radio's `isScan` state
+      notifyListeners(); // Notify UI to rebuild
+    } else {
+      throw Exception("Failed to set scan mode via WRITE_SETTINGS.");
+    }
+  }
+
   @override
   void dispose() {
     _btStreamSubscription?.cancel();

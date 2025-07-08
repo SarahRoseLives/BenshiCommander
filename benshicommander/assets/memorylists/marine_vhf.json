@@ -1,0 +1,16 @@
+{
+  "name": "Marine VHF Channels",
+  "date": "2025-07-08T00:00:00Z",
+  "channels": [
+    {"channelId": 1, "name": "Channel 6 (Intership Safety)", "rxFreq": 156.300, "txFreq": 156.300, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 2, "name": "Channel 9 (Boater Calling)", "rxFreq": 156.450, "txFreq": 156.450, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 3, "name": "Channel 13 (Bridge‑to‑Bridge)", "rxFreq": 156.650, "txFreq": 156.650, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 4, "name": "Channel 16 (Distress/Calling)", "rxFreq": 156.800, "txFreq": 156.800, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 5, "name": "Channel 19 (Working)", "rxFreq": 156.950, "txFreq": 156.950, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 6, "name": "Channel 22 (USCG Working)", "rxFreq": 157.100, "txFreq": 157.100, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 7, "name": "Channel 70 (DSC)", "rxFreq": 156.525, "txFreq": 156.525, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 8, "name": "Channel 72 (Working)", "rxFreq": 156.625, "txFreq": 156.625, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 9, "name": "Channel 73 (Working)", "rxFreq": 156.675, "txFreq": 156.675, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"},
+    {"channelId": 10, "name": "Channel 74 (Working)", "rxFreq": 156.725, "txFreq": 156.725, "bandwidth": "WIDE", "scan": true, "rxSubAudio": null, "txSubAudio": null, "txAtMaxPower": true, "txAtMedPower": false, "txMod": "FM", "rxMod": "FM"}
+  ]
+}

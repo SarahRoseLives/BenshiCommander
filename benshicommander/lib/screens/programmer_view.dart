@@ -4,8 +4,12 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import '../benshi/radio_controller.dart';
 import '../benshi/protocol/protocol.dart';
+import '../models/repeater.dart';
 import '../services/web_programmer.dart';
 import '../services/memory_storage_service.dart';
+import '../services/location_service.dart';
+import '../services/repeaterbook_service.dart';
+import 'package:geolocator/geolocator.dart' as geo;
 
 class ProgrammerView extends StatefulWidget {
   final RadioController radioController;
@@ -16,6 +20,11 @@ class ProgrammerView extends StatefulWidget {
 }
 
 class _ProgrammerViewState extends State<ProgrammerView> {
+  final LocationService _locationService = LocationService();
+  final RepeaterBookService _repeaterBookService = RepeaterBookService();
+  StreamSubscription<geo.Position>? _positionStream;
+  geo.Position? _lastLoadedPosition;
+
   late final ChirpExporter _chirpExporter;
 
   List<Channel>? _channels;
@@ -24,10 +33,12 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   final Set<int> _modifiedChannelIds = {};
   bool _orderHasChanged = false;
 
-  // Backup management
   List<MemoryBackup> _backups = [];
   List<MemoryBackup> _preloadAssets = [];
   bool _loadingBackups = true;
+
+  // Expansion state for memory library card
+  bool _memoryLibraryExpanded = false;
 
   @override
   void initState() {
@@ -37,15 +48,12 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       onStatusUpdate: (message) {
         if (mounted) setState(() {});
       },
-      // FIX: The callback now correctly accepts a List<Channel>
       onChannelsUpdatedFromWeb: (List<Channel> updatedChannels) {
         if (mounted) {
           setState(() {
-            // After a web update, the server has written to the radio.
-            // The returned list is the new source of truth. We replace our local list with it.
             _channels = updatedChannels;
-            _modifiedChannelIds.clear(); // All changes are considered saved.
-            _orderHasChanged = false;    // The order is now synced.
+            _modifiedChannelIds.clear();
+            _orderHasChanged = false;
             _statusMessage = "Radio memory synced from web programmer.";
           });
         }
@@ -69,6 +77,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   @override
   void dispose() {
     _chirpExporter.stop();
+    _positionStream?.cancel();
     super.dispose();
   }
 
@@ -100,19 +109,81 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     }
   }
 
-  // BACKUP MEMORY: Save
+  // --- GPS Repeater Loading ---
+  Future<void> loadLocalRepeaters() async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'Getting your location...';
+    });
+
+    try {
+      final position = await _locationService.getCurrentLocation();
+      if (position == null) {
+        throw Exception("Could not get current location.");
+      }
+
+      _updateStatus('Location found. Searching for repeaters in your state...');
+
+      final repeaters = await _repeaterBookService.getRepeatersNearby(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+
+      if (repeaters.isEmpty) {
+        _updateStatus('No repeaters found in your state.');
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final newChannels = repeaters.asMap().entries.map((e) => e.value.toChannel(e.key)).toList();
+
+      setState(() {
+        _channels = newChannels;
+        _modifiedChannelIds.clear();
+        _orderHasChanged = true;
+        _isLoading = false;
+        _statusMessage = 'Loaded ${newChannels.length} repeaters in your state. Press "Write All" to program radio.';
+        _lastLoadedPosition = position;
+      });
+
+      _startLocationMonitoring();
+
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Error loading repeaters: $e';
+      });
+    }
+  }
+
+  void _startLocationMonitoring() {
+    _positionStream?.cancel();
+    _positionStream = _locationService.getLocationStream(distanceFilter: 1609 * 15).listen((geo.Position newPosition) {
+      if (_lastLoadedPosition != null) {
+        final distance = _locationService.getDistanceInMiles(_lastLoadedPosition!.latitude, _lastLoadedPosition!.longitude, newPosition.latitude, newPosition.longitude);
+        if (distance > 15) {
+          _updateStatus("Moved >15 miles. Automatically refreshing local repeaters...");
+          loadLocalRepeaters();
+        }
+      }
+    });
+  }
+
+  // --- End GPS Repeater Loading ---
+
   Future<void> _backupToPhone() async {
     if (_channels == null) return;
     final name = await _promptForName(context, "Name this backup:");
     if (name == null || name.trim().isEmpty) return;
     await MemoryStorageService().saveBackup(name, _channels!);
     await _refreshBackups();
+    _closeMemoryLibraryCard();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Backup "$name" saved.')));
     }
   }
 
-  // BACKUP MEMORY: Restore
   Future<void> _restoreBackup(MemoryBackup backup) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -131,36 +202,42 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       _modifiedChannelIds.clear();
       _orderHasChanged = true;
       _statusMessage = 'Loaded backup: ${backup.name}';
+      _memoryLibraryExpanded = false;
     });
   }
 
-  // BACKUP MEMORY: Delete
   Future<void> _deleteBackup(MemoryBackup backup) async {
     await MemoryStorageService().deleteBackup(backup);
     await _refreshBackups();
+    // Don't close card on delete.
   }
 
-  // PRELOAD: Load asset
   Future<void> _loadPreloadAsset(MemoryBackup asset) async {
     setState(() {
       _channels = asset.channels;
       _modifiedChannelIds.clear();
       _orderHasChanged = true;
       _statusMessage = 'Loaded preloaded list: ${asset.name}';
+      _memoryLibraryExpanded = false;
     });
   }
 
-  // NEW EMPTY LIST
   Future<void> _createNewList() async {
     setState(() {
       _channels = [];
       _modifiedChannelIds.clear();
       _orderHasChanged = true;
       _statusMessage = "Created new empty memory list.";
+      _memoryLibraryExpanded = false;
     });
   }
 
-  // Writes only individually modified channels
+  void _closeMemoryLibraryCard() {
+    setState(() {
+      _memoryLibraryExpanded = false;
+    });
+  }
+
   Future<void> _writeModifiedChannelsToRadio() async {
     if (_isLoading || _channels == null || _modifiedChannelIds.isEmpty) {
       if (mounted) {
@@ -329,6 +406,17 @@ class _ProgrammerViewState extends State<ProgrammerView> {
               style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
             ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.gps_fixed),
+              label: const Text('Load Local Repeaters'),
+              onPressed: loadLocalRepeaters,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.teal,
+                side: const BorderSide(color: Colors.teal),
+                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+              ),
+            ),
           ],
         ),
       ),
@@ -338,9 +426,19 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   Widget _buildProgrammerView() {
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Text(_statusMessage, textAlign: TextAlign.center),
+        Container(
+          color: Colors.blue.shade50,
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline, size: 20, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(_statusMessage, textAlign: TextAlign.center, style: const TextStyle(color: Colors.blue),),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
         ),
         const Divider(height: 1),
         Expanded(
@@ -482,78 +580,95 @@ class _ProgrammerViewState extends State<ProgrammerView> {
         leading: const Icon(Icons.save),
         title: const Text('Memory Library'),
         subtitle: const Text('Save & restore radio memory lists'),
+        initiallyExpanded: _memoryLibraryExpanded,
+        onExpansionChanged: (expanded) {
+          setState(() {
+            _memoryLibraryExpanded = expanded;
+          });
+        },
         children: [
-          if (_channels != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6),
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.backup),
-                label: const Text('Backup current to phone'),
-                onPressed: _backupToPhone,
-              ),
-            ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.note_add),
-              label: const Text('New empty memory list'),
-              onPressed: _createNewList,
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6),
+            child: Column(
+              children: [
+                if (_channels != null)
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.backup),
+                    label: const Text('Backup current to phone'),
+                    onPressed: _backupToPhone,
+                  ),
+                const SizedBox(height: 4),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.note_add),
+                  label: const Text('New empty memory list'),
+                  onPressed: _createNewList,
+                ),
+              ],
             ),
           ),
-          if (_preloadAssets.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Preloaded Templates:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  for (final asset in _preloadAssets)
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.star, color: Colors.amber, size: 20),
-                      title: Text(asset.name),
-                      trailing: ElevatedButton(
-                        onPressed: () => _loadPreloadAsset(asset),
-                        child: const Text('Load'),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          if (_loadingBackups)
-            const Padding(
-              padding: EdgeInsets.all(12.0),
-              child: LinearProgressIndicator(),
-            ),
-          if (_backups.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Saved Backups:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  for (final backup in _backups)
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.save_alt, size: 20),
-                      title: Text(backup.name),
-                      subtitle: Text(backup.dateString),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ElevatedButton(
-                            onPressed: () => _restoreBackup(backup),
-                            child: const Text('Load'),
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteBackup(backup),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
+          // Scrollable content below the two top buttons
+          if (_preloadAssets.isNotEmpty || _loadingBackups || _backups.isNotEmpty)
+            SizedBox(
+              height: 220,
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_backups.isNotEmpty)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Saved Backups:', style: TextStyle(fontWeight: FontWeight.bold)),
+                            for (final backup in _backups)
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.save_alt, size: 20),
+                                title: Text(backup.name),
+                                subtitle: Text(backup.dateString),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ElevatedButton(
+                                      onPressed: () => _restoreBackup(backup),
+                                      child: const Text('Load'),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.red),
+                                      onPressed: () => _deleteBackup(backup),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      if (_preloadAssets.isNotEmpty)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Preloaded Templates:', style: TextStyle(fontWeight: FontWeight.bold)),
+                            for (final asset in _preloadAssets)
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.star, color: Colors.amber, size: 20),
+                                title: Text(asset.name),
+                                trailing: ElevatedButton(
+                                  onPressed: () => _loadPreloadAsset(asset),
+                                  child: const Text('Load'),
+                                ),
+                              ),
+                          ],
+                        ),
+                      if (_loadingBackups)
+                        const Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: LinearProgressIndicator(),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],
@@ -577,7 +692,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   }
 }
 
-// Dialog remains the same, no changes needed here.
 class _EditChannelDialog extends StatefulWidget {
   final Channel channel;
   const _EditChannelDialog({Key? key, required this.channel}) : super(key: key);

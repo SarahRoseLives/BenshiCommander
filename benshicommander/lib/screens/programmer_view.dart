@@ -19,7 +19,9 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   List<Channel>? _channels;
   bool _isLoading = false;
   String _statusMessage = 'Read channels from the radio to begin editing.';
+  // State for tracking changes
   final Set<int> _modifiedChannelIds = {};
+  bool _orderHasChanged = false;
 
   @override
   void initState() {
@@ -29,18 +31,16 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       onStatusUpdate: (message) {
         if (mounted) setState(() {});
       },
-      onChannelUpdatedFromWeb: (updatedChannel) {
+      onChannelsUpdatedFromWeb: (updatedChannels) {
         if (mounted && _channels != null) {
           setState(() {
-            final index = _channels!.indexWhere((c) => c.channelId == updatedChannel.channelId);
-            if (index != -1) {
-              _channels![index] = updatedChannel;
-              _modifiedChannelIds.add(updatedChannel.channelId);
-              _statusMessage = "Channel ${updatedChannel.channelId + 1} updated from web.";
-            }
+            _channels = updatedChannels;
+            _modifiedChannelIds.clear();
+            _orderHasChanged = true;
+            _statusMessage = "Channels updated from web. Review and write to radio.";
           });
         }
-      }
+      },
     );
   }
 
@@ -60,6 +60,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       _isLoading = true;
       _statusMessage = 'Reading all channels from radio...';
       _modifiedChannelIds.clear();
+      _orderHasChanged = false;
     });
 
     try {
@@ -77,7 +78,8 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     }
   }
 
-  Future<void> _writeChannelsToRadio() async {
+  // Writes only individually modified channels
+  Future<void> _writeModifiedChannelsToRadio() async {
     if (_isLoading || _channels == null || _modifiedChannelIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('No modified channels to write.'),
@@ -99,11 +101,11 @@ class _ProgrammerViewState extends State<ProgrammerView> {
         await widget.radioController.writeChannel(channel);
         successCount++;
         successfullyWrittenIds.add(channel.channelId);
-        await Future.delayed(const Duration(milliseconds: 100)); // Small delay between writes
+        await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         errorCount++;
         _updateStatus('Error writing channel ${channel.channelId + 1}: $e');
-        break; // Stop on first error
+        break;
       }
     }
 
@@ -112,6 +114,56 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       _statusMessage = 'Write complete. Success: $successCount, Failed: $errorCount.';
       _modifiedChannelIds.removeWhere((id) => successfullyWrittenIds.contains(id));
     });
+  }
+
+  // Writes ALL channels in their new order. Crucial after reordering.
+  Future<void> _writeAllChannelsToRadio() async {
+    if (_isLoading || _channels == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Write All'),
+        content: Text('This will overwrite all ${ _channels!.length} channels on the radio with the current order and settings. Are you sure?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Write All')),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isLoading = true);
+    int successCount = 0;
+    int errorCount = 0;
+
+    for (int i = 0; i < _channels!.length; i++) {
+      final oldChannel = _channels![i];
+      // Create a new channel object with the updated channelId (its new index)
+      final channelToWrite = oldChannel.copyWith(channelId: i);
+
+      try {
+        _updateStatus('Writing to memory slot ${i + 1} (was ${oldChannel.channelId + 1})...');
+        await widget.radioController.writeChannel(channelToWrite);
+        successCount++;
+        await Future.delayed(const Duration(milliseconds: 50));
+      } catch (e) {
+        errorCount++;
+         _updateStatus('Error writing to slot ${i + 1}: $e');
+        break; // Stop on first error
+      }
+    }
+
+    setState(() {
+      _isLoading = false;
+      _statusMessage = 'Full write complete. Success: $successCount, Failed: $errorCount.';
+      // After a full write, all changes are saved.
+      _modifiedChannelIds.clear();
+      _orderHasChanged = false;
+    });
+    // It's good practice to re-read to ensure perfect sync.
+    await _readChannelsFromRadio();
   }
 
   Future<void> _editChannel(int index) async {
@@ -175,7 +227,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.radio, size: 100, color: Colors.grey),
+            const Icon(Icons.edit_note, size: 100, color: Colors.grey),
             const SizedBox(height: 20),
             Text(
               'In-App Programmer',
@@ -207,20 +259,21 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       children: [
         Padding(
           padding: const EdgeInsets.all(12.0),
-          child: Text(_statusMessage),
+          child: Text(_statusMessage, textAlign: TextAlign.center),
         ),
         const Divider(height: 1),
         Expanded(
-          child: ListView.builder(
+          child: ReorderableListView.builder(
             itemCount: _channels?.length ?? 0,
             itemBuilder: (context, index) {
               final channel = _channels![index];
-              final isModified = _modifiedChannelIds.contains(channel.channelId);
+              final isModified = _modifiedChannelIds.contains(channel.channelId) || _orderHasChanged;
               return ListTile(
+                key: ValueKey(channel.channelId),
                 leading: CircleAvatar(
                   backgroundColor: isModified ? Colors.orange.shade100 : Colors.blue.shade50,
                   child: Text(
-                    (channel.channelId + 1).toString(),
+                    (index + 1).toString(), // Display index-based location
                     style: TextStyle(color: isModified ? Colors.orange.shade800 : Colors.blue.shade800),
                   ),
                 ),
@@ -228,13 +281,30 @@ class _ProgrammerViewState extends State<ProgrammerView> {
                     style: TextStyle(
                         fontWeight: isModified ? FontWeight.bold : FontWeight.normal)),
                 subtitle: Text(
-                    '${channel.rxFreq.toStringAsFixed(4)} MHz | ${channel.txPower} Power | ${channel.bandwidth.name}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.edit_note),
-                  onPressed: () => _editChannel(index),
+                    '${channel.rxFreq.toStringAsFixed(4)} MHz | ${channel.txPower} | ${channel.bandwidth.name}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_note),
+                      onPressed: () => _editChannel(index),
+                    ),
+                    const Icon(Icons.drag_handle),
+                  ],
                 ),
                 tileColor: isModified ? Colors.orange.withOpacity(0.05) : null,
               );
+            },
+            onReorder: (int oldIndex, int newIndex) {
+              setState(() {
+                if (newIndex > oldIndex) {
+                  newIndex -= 1;
+                }
+                final Channel item = _channels!.removeAt(oldIndex);
+                _channels!.insert(newIndex, item);
+                _orderHasChanged = true;
+                _statusMessage = 'Channel order changed. Press "Write All" to save.';
+              });
             },
           ),
         ),
@@ -249,15 +319,21 @@ class _ProgrammerViewState extends State<ProgrammerView> {
                 label: const Text('Read Again'),
                 onPressed: _readChannelsFromRadio,
               ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.save),
-                label: Text('Write Changes (${_modifiedChannelIds.length})'),
-                onPressed: _modifiedChannelIds.isNotEmpty ? _writeChannelsToRadio : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange.shade700,
-                  foregroundColor: Colors.white,
+              // Show "Write All" if order changed, otherwise show "Write Changes"
+              if (_orderHasChanged)
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.save_as),
+                  label: const Text('Write All Channels'),
+                  onPressed: _writeAllChannelsToRadio,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+                )
+              else
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.save),
+                  label: Text('Write Changes (${_modifiedChannelIds.length})'),
+                  onPressed: _modifiedChannelIds.isNotEmpty ? _writeModifiedChannelsToRadio : null,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white),
                 ),
-              ),
             ],
           ),
         ),
@@ -269,10 +345,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     return Card(
       margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
       child: ExpansionTile(
-        leading: Icon(
-          Icons.import_export,
-          color: Colors.teal.shade700,
-        ),
+        leading: Icon(Icons.http, color: Colors.teal.shade700),
         title: const Text('Web Programmer'),
         subtitle: Text(_chirpExporter.isRunning ? 'Server is ON' : 'Server is OFF'),
         children: [
@@ -321,7 +394,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   }
 }
 
-// A dialog for editing a single channel.
+// Dialog remains the same, no changes needed here.
 class _EditChannelDialog extends StatefulWidget {
   final Channel channel;
   const _EditChannelDialog({Key? key, required this.channel}) : super(key: key);
@@ -331,14 +404,12 @@ class _EditChannelDialog extends StatefulWidget {
 }
 
 class _EditChannelDialogState extends State<_EditChannelDialog> {
-  // Controllers
   late final TextEditingController _nameController;
   late final TextEditingController _rxFreqController;
   late final TextEditingController _txFreqController;
   late final TextEditingController _rxToneController;
   late final TextEditingController _txToneController;
 
-  // State variables
   late BandwidthType _bandwidth;
   late String _power;
   late bool _scan;
@@ -359,24 +430,18 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
     _power = ch.txPower;
     _scan = ch.scan;
 
-    // Initialize RX Tone
     final rxTuple = _getToneTypeAndValue(ch.rxSubAudio);
     _rxToneType = rxTuple.item1;
     _rxToneController = TextEditingController(text: rxTuple.item2);
 
-    // Initialize TX Tone
     final txTuple = _getToneTypeAndValue(ch.txSubAudio);
     _txToneType = txTuple.item1;
     _txToneController = TextEditingController(text: txTuple.item2);
   }
 
   Tuple2<String, String> _getToneTypeAndValue(dynamic subAudio) {
-    if (subAudio is double) {
-      return Tuple2('CTCSS', subAudio.toString());
-    }
-    if (subAudio is int) {
-      return Tuple2('DCS', subAudio.toString());
-    }
+    if (subAudio is double) return Tuple2('CTCSS', subAudio.toString());
+    if (subAudio is int) return Tuple2('DCS', subAudio.toString());
     return const Tuple2('None', '');
   }
 
@@ -392,11 +457,11 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
 
   void _save() {
     if (!_formKey.currentState!.validate()) {
-      return; // Don't save if form is invalid
+      return;
     }
 
-    // Helper to parse tones
     dynamic parseSubAudio(String type, String value) {
+      if (value.isEmpty) return null;
       if (type == 'CTCSS') return double.tryParse(value);
       if (type == 'DCS') return int.tryParse(value);
       return null;
@@ -437,39 +502,31 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
                 controller: _rxFreqController,
                 decoration: const InputDecoration(labelText: 'RX Frequency (MHz)', border: OutlineInputBorder()),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                validator: (v) =>
-                    (double.tryParse(v ?? '') == null) ? 'Invalid frequency' : null,
+                validator: (v) => (double.tryParse(v ?? '') == null) ? 'Invalid frequency' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _txFreqController,
                 decoration: const InputDecoration(labelText: 'TX Frequency (MHz)', border: OutlineInputBorder()),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                validator: (v) =>
-                    (double.tryParse(v ?? '') == null) ? 'Invalid frequency' : null,
+                validator: (v) => (double.tryParse(v ?? '') == null) ? 'Invalid frequency' : null,
               ),
               const SizedBox(height: 16),
-              _buildToneEditor("RX Tone", _rxToneType, _rxToneController,
-                  (type) => setState(() => _rxToneType = type)),
+              _buildToneEditor("RX Tone", _rxToneType, _rxToneController, (type) => setState(() => _rxToneType = type)),
               const SizedBox(height: 16),
-              _buildToneEditor("TX Tone", _txToneType, _txToneController,
-                  (type) => setState(() => _txToneType = type)),
+              _buildToneEditor("TX Tone", _txToneType, _txToneController, (type) => setState(() => _txToneType = type)),
               const SizedBox(height: 16),
               DropdownButtonFormField<BandwidthType>(
                 value: _bandwidth,
                 decoration: const InputDecoration(labelText: 'Bandwidth', border: OutlineInputBorder()),
-                items: BandwidthType.values
-                    .map((bw) => DropdownMenuItem(value: bw, child: Text(bw.name)))
-                    .toList(),
+                items: BandwidthType.values.map((bw) => DropdownMenuItem(value: bw, child: Text(bw.name))).toList(),
                 onChanged: (v) => setState(() => _bandwidth = v!),
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 value: _power,
                 decoration: const InputDecoration(labelText: 'TX Power', border: OutlineInputBorder()),
-                items: ['Low', 'Medium', 'High']
-                    .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                    .toList(),
+                items: ['Low', 'Medium', 'High'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
                 onChanged: (v) => setState(() => _power = v!),
               ),
               SwitchListTile(
@@ -484,20 +541,13 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: _save,
-          child: const Text('Save'),
-        ),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        ElevatedButton(onPressed: _save, child: const Text('Save')),
       ],
     );
   }
 
-  Widget _buildToneEditor(String label, String currentType,
-      TextEditingController controller, Function(String) onTypeChanged) {
+  Widget _buildToneEditor(String label, String currentType, TextEditingController controller, Function(String) onTypeChanged) {
     return InputDecorator(
       decoration: InputDecoration(
         labelText: label,
@@ -509,9 +559,7 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
           DropdownButton<String>(
             value: currentType,
             underline: Container(),
-            items: ['None', 'CTCSS', 'DCS']
-                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                .toList(),
+            items: ['None', 'CTCSS', 'DCS'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
             onChanged: (v) {
               if (v != null) onTypeChanged(v);
             },
@@ -523,12 +571,9 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
               enabled: currentType != 'None',
               decoration: InputDecoration(
                 isDense: true,
-                hintText: currentType == 'CTCSS'
-                    ? 'e.g., 88.5'
-                    : (currentType == 'DCS' ? 'e.g., 23' : 'Disabled'),
+                hintText: currentType == 'CTCSS' ? 'e.g., 88.5' : (currentType == 'DCS' ? 'e.g., 23' : 'Disabled'),
               ),
-              keyboardType:
-                  TextInputType.numberWithOptions(decimal: currentType == 'CTCSS'),
+              keyboardType: TextInputType.numberWithOptions(decimal: currentType == 'CTCSS'),
             ),
           ),
         ],
@@ -537,7 +582,6 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
   }
 }
 
-// A simple tuple class to help with tone parsing.
 class Tuple2<T1, T2> {
   final T1 item1;
   final T2 item2;

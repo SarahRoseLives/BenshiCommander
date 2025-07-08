@@ -229,8 +229,6 @@ class Position {
   }
 }
 
-// REPLACE the ENTIRE Channel class with the code below.
-
 class Channel {
   final int channelId;
   final ModulationType txMod;
@@ -388,8 +386,8 @@ class Channel {
       txFreq: txFreq ?? this.txFreq,
       rxMod: rxMod ?? this.rxMod,
       rxFreq: rxFreq ?? this.rxFreq,
-      txSubAudio: txSubAudio, // Use the new value directly
-      rxSubAudio: rxSubAudio, // Use the new value directly
+      txSubAudio: txSubAudio ?? this.txSubAudio,
+      rxSubAudio: rxSubAudio ?? this.rxSubAudio,
       scan: scan ?? this.scan,
       txAtMaxPower: txAtMaxPower ?? this.txAtMaxPower,
       txAtMedPower: txAtMedPower ?? this.txAtMedPower,

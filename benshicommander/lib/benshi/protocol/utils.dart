@@ -4,8 +4,6 @@ import 'dart:convert';
 class ByteWriter {
   final ByteData _data;
   int _bitOffset = 0;
-  int _byteIndex = 0;
-  int _bitInByte = 0;
 
   ByteWriter(int length) : _data = ByteData(length);
 
@@ -16,12 +14,15 @@ class ByteWriter {
   }
 
   void writeBool(bool value) {
+    if (_bitOffset >= _data.lengthInBytes * 8) {
+      throw Exception("Write overflow");
+    }
+    int byteIndex = _bitOffset ~/ 8;
+    int bitInByte = _bitOffset % 8;
     if (value) {
-      _data.setUint8(_byteIndex, _data.getUint8(_byteIndex) | (1 << (7 - _bitInByte)));
+      _data.setUint8(byteIndex, _data.getUint8(byteIndex) | (1 << (7 - bitInByte)));
     }
     _bitOffset++;
-    _bitInByte = _bitOffset % 8;
-    _byteIndex = _bitOffset ~/ 8;
   }
 
   void writeBytes(Uint8List bytes) {
@@ -60,9 +61,10 @@ class ByteReader {
 
   int readSignedInt(int bitLength) {
     int value = readInt(bitLength);
+    int maxUnsigned = 1 << bitLength;
     int maxSigned = 1 << (bitLength - 1);
     if (value >= maxSigned) {
-      return value - (1 << bitLength);
+      return value - maxUnsigned;
     }
     return value;
   }
@@ -71,12 +73,18 @@ class ByteReader {
 
   void skipBits(int bitLength) {
     if (bitLength > remainingBits) {
-       throw Exception('Not enough bits to skip. Requested: $bitLength, Remaining: $remainingBits');
+        // Instead of throwing, just advance to the end.
+        // This handles cases where optional fields at the end are missing.
+        _bitOffset = _data.lengthInBytes * 8;
+        return;
     }
     _bitOffset += bitLength;
   }
 
   String readString(int byteLength) {
+     if (byteLength * 8 > remainingBits) {
+        byteLength = remainingBits ~/ 8;
+    }
     final bytes = Uint8List(byteLength);
     for (int i = 0; i < byteLength; i++) {
       bytes[i] = readInt(8);
@@ -86,7 +94,7 @@ class ByteReader {
 
   Uint8List readBytes(int byteLength) {
     if (byteLength * 8 > remainingBits) {
-        throw Exception('Not enough bytes to read. Requested: $byteLength, Remaining: ${remainingBits~/8}');
+       throw Exception('Not enough bytes to read. Requested: $byteLength, Remaining: ${remainingBits~/8}');
     }
     return Uint8List.fromList(List.generate(byteLength, (i) => readInt(8)));
   }

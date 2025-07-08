@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../benshi/radio_controller.dart';
+import '../benshi/protocol/protocol.dart'; // Added this import
 import 'package:intl/intl.dart';
 
 class DashboardView extends StatefulWidget {
@@ -14,19 +15,16 @@ class _DashboardViewState extends State<DashboardView> {
   @override
   void initState() {
     super.initState();
-    // Listen for changes in the controller to rebuild the UI
     widget.radioController.addListener(_onRadioUpdate);
   }
 
   @override
   void dispose() {
-    // Clean up the listener when the widget is removed
     widget.radioController.removeListener(_onRadioUpdate);
     super.dispose();
   }
 
   void _onRadioUpdate() {
-    // This triggers a rebuild of the widget with the new data
     if (mounted) {
       setState(() {});
     }
@@ -53,8 +51,11 @@ class _DashboardViewState extends State<DashboardView> {
 
   @override
   Widget build(BuildContext context) {
-    // Use the radioController from the widget, which is always the same instance
     final radio = widget.radioController;
+
+    if (!radio.isReady) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
@@ -83,7 +84,7 @@ class _DashboardViewState extends State<DashboardView> {
                       ),
                       const Spacer(),
                       Icon(getActivityIcon(radio.isInTx, radio.isInRx),
-                        color: getActivityColor(radio.isInTx, radio.isInRx), size: 28),
+                          color: getActivityColor(radio.isInTx, radio.isInRx), size: 28),
                       const SizedBox(width: 4),
                       Text(getActivityText(radio.isInTx, radio.isInRx),
                         style: TextStyle(
@@ -97,7 +98,7 @@ class _DashboardViewState extends State<DashboardView> {
                   // RSSI Bar and Value
                   Row(
                     children: [
-                      Icon(Icons.network_cell, color: Colors.blueGrey),
+                      const Icon(Icons.network_cell, color: Colors.blueGrey),
                       const SizedBox(width: 8),
                       Expanded(
                         child: LinearProgressIndicator(
@@ -134,12 +135,12 @@ class _DashboardViewState extends State<DashboardView> {
                       ),
                       _StatusChip(
                         icon: Icons.visibility,
-                        label: "Dual Watch: ${radio.doubleChannel}",
-                        color: radio.doubleChannel == "OFF" ? Colors.grey : Colors.blue,
+                        label: "Dual Watch: ${radio.status?.doubleChannel.name ?? 'OFF'}",
+                        color: radio.status?.doubleChannel == ChannelType.OFF ? Colors.grey : Colors.blue,
                       ),
                       _StatusChip(
                         icon: Icons.confirmation_num,
-                        label: "Channel: ${radio.currChId + 1}", // Show 1-based index
+                        label: "Channel: ${radio.currentChannelId + 1}", // Show 1-based index
                         color: Colors.indigo,
                       ),
                     ],
@@ -161,14 +162,14 @@ class _DashboardViewState extends State<DashboardView> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.list_alt, color: Colors.deepPurple, size: 28),
+                      const Icon(Icons.list_alt, color: Colors.deepPurple, size: 28),
                       const SizedBox(width: 8),
                       Text("Channel Info", style: Theme.of(context).textTheme.headlineSmall),
                     ],
                   ),
                   const Divider(),
                   Text(
-                    radio.name,
+                    radio.currentChannelName,
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
@@ -177,12 +178,12 @@ class _DashboardViewState extends State<DashboardView> {
                       _InfoTile(
                         icon: Icons.arrow_downward,
                         label: "RX",
-                        value: "${radio.rxFreq.toStringAsFixed(4)} MHz",
+                        value: "${radio.currentRxFreq.toStringAsFixed(4)} MHz",
                       ),
                       _InfoTile(
                         icon: Icons.arrow_upward,
                         label: "TX",
-                        value: "${radio.txFreq.toStringAsFixed(4)} MHz",
+                        value: "${radio.currentChannel?.txFreq.toStringAsFixed(4) ?? 'N/A'} MHz",
                       ),
                     ],
                   ),
@@ -192,28 +193,28 @@ class _DashboardViewState extends State<DashboardView> {
                     runSpacing: 10,
                     alignment: WrapAlignment.center,
                     children: [
-                       _StatusChip(
-                        icon: Icons.waves,
-                        label: "BW: ${radio.bandwidth}",
-                        color: Colors.teal,
-                      ),
-                      _StatusChip(
-                        icon: Icons.music_note,
-                        label: "RX Tone: ${radio.rxTone}",
-                        color: Colors.blueGrey,
-                      ),
-                      _StatusChip(
-                        icon: Icons.music_note_outlined,
-                        label: "TX Tone: ${radio.txTone}",
-                        color: Colors.blueGrey,
-                      ),
-                      _StatusChip(
-                        icon: Icons.bolt,
-                        label: "TX Power: ${radio.txPower}",
-                        color: radio.txPower == "High"
-                            ? Colors.red
-                            : (radio.txPower == "Medium" ? Colors.amber : Colors.green),
-                      ),
+                        _StatusChip(
+                          icon: Icons.waves,
+                          label: "BW: ${radio.currentChannel?.bandwidth.name ?? 'N/A'}",
+                          color: Colors.teal,
+                        ),
+                        _StatusChip(
+                          icon: Icons.music_note,
+                          label: "RX Tone: ${radio.currentChannel?.rxTone ?? 'N/A'}",
+                          color: Colors.blueGrey,
+                        ),
+                        _StatusChip(
+                          icon: Icons.music_note_outlined,
+                          label: "TX Tone: ${radio.currentChannel?.txTone ?? 'N/A'}",
+                          color: Colors.blueGrey,
+                        ),
+                        _StatusChip(
+                          icon: Icons.bolt,
+                          label: "TX Power: ${radio.currentChannel?.txPower ?? 'N/A'}",
+                          color: radio.currentChannel?.txPower == "High"
+                              ? Colors.red
+                              : (radio.currentChannel?.txPower == "Medium" ? Colors.amber : Colors.green),
+                        ),
                     ],
                   ),
                 ],
@@ -233,7 +234,7 @@ class _DashboardViewState extends State<DashboardView> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.gps_fixed, color: Colors.green, size: 28),
+                      const Icon(Icons.gps_fixed, color: Colors.green, size: 28),
                       const SizedBox(width: 8),
                       Text("GPS & Location", style: Theme.of(context).textTheme.headlineSmall),
                     ],
@@ -251,32 +252,32 @@ class _DashboardViewState extends State<DashboardView> {
                       ),
                       _StatusChip(
                         icon: Icons.location_on,
-                        label: "Lat: ${radio.latitude.toStringAsFixed(5)}",
+                        label: "Lat: ${radio.gps?.latitude.toStringAsFixed(5) ?? 'N/A'}",
                         color: Colors.blue,
                       ),
                       _StatusChip(
                         icon: Icons.location_on_outlined,
-                        label: "Lon: ${radio.longitude.toStringAsFixed(5)}",
+                        label: "Lon: ${radio.gps?.longitude.toStringAsFixed(5) ?? 'N/A'}",
                         color: Colors.blue,
                       ),
                       _StatusChip(
                         icon: Icons.speed,
-                        label: "Speed: ${radio.speed} km/h",
+                        label: "Speed: ${radio.gps?.speed ?? 'N/A'} km/h",
                         color: Colors.amber,
                       ),
                       _StatusChip(
                         icon: Icons.navigation,
-                        label: "Heading: ${radio.heading}°",
+                        label: "Heading: ${radio.gps?.heading ?? 'N/A'}°",
                         color: Colors.purple,
                       ),
                       _StatusChip(
                         icon: Icons.height,
-                        label: "Alt: ${radio.altitude} m",
+                        label: "Alt: ${radio.gps?.altitude ?? 'N/A'} m",
                         color: Colors.teal,
                       ),
                       _StatusChip(
                         icon: Icons.precision_manufacturing,
-                        label: "Accuracy: ${radio.accuracy} m",
+                        label: "Accuracy: ${radio.gps?.accuracy ?? 'N/A'} m",
                         color: Colors.deepOrange,
                       ),
                     ],
@@ -284,7 +285,7 @@ class _DashboardViewState extends State<DashboardView> {
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: Text(
-                      "Last Fix: ${DateFormat.yMd().add_Hms().format(radio.time.toLocal())}",
+                      radio.gps != null ? "Last Fix: ${DateFormat.yMd().add_Hms().format(radio.gps!.time.toLocal())}" : "Last Fix: N/A",
                       style: const TextStyle(fontSize: 13, color: Colors.grey),
                     ),
                   ),
@@ -305,7 +306,7 @@ class _DashboardViewState extends State<DashboardView> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.settings, color: Colors.indigo, size: 28),
+                      const Icon(Icons.settings, color: Colors.indigo, size: 28),
                       const SizedBox(width: 8),
                       Text("Device & Settings", style: Theme.of(context).textTheme.headlineSmall),
                     ],
@@ -316,17 +317,17 @@ class _DashboardViewState extends State<DashboardView> {
                       _InfoTile(
                         icon: Icons.battery_full,
                         label: "Voltage",
-                        value: "${radio.batteryVoltage.toStringAsFixed(2)} V",
+                        value: "${radio.batteryVoltage?.toStringAsFixed(2) ?? 'N/A'} V",
                       ),
                       _InfoTile(
                         icon: Icons.battery_charging_full,
                         label: "Battery",
-                        value: "${radio.batteryLevelAsPercentage}%",
+                        value: "${radio.batteryLevelAsPercentage ?? 'N/A'}%",
                       ),
                       _InfoTile(
                         icon: Icons.bluetooth,
                         label: "HFP",
-                        value: radio.isHfpConnected ? "Connected" : "Not Connected",
+                        value: (radio.status?.isHfpConnected ?? false) ? "Connected" : "Not Connected",
                       ),
                     ],
                   ),
@@ -336,17 +337,17 @@ class _DashboardViewState extends State<DashboardView> {
                       _InfoTile(
                         icon: Icons.mic,
                         label: "Mic Gain",
-                        value: "${radio.micGain}",
+                        value: "${radio.settings?.micGain ?? 'N/A'}",
                       ),
                       _InfoTile(
                         icon: Icons.mic_external_on,
                         label: "BT Mic Gain",
-                        value: "${radio.btMicGain}",
+                        value: "${radio.settings?.btMicGain ?? 'N/A'}",
                       ),
-                      _InfoTile(
+                       _InfoTile(
                         icon: Icons.volume_up,
                         label: "Squelch",
-                        value: "${radio.squelchLevel}",
+                        value: "${radio.settings?.squelchLevel ?? 'N/A'}",
                       ),
                     ],
                   ),
@@ -367,10 +368,10 @@ class _DashboardViewState extends State<DashboardView> {
                     spacing: 16,
                     runSpacing: 8,
                     children: [
-                      _AboutChip(label: "Vendor: ${radio.vendorId}"),
-                      _AboutChip(label: "Product: ${radio.productId}"),
-                      _AboutChip(label: "HW: ${radio.hardwareVersion}"),
-                      _AboutChip(label: "FW: ${radio.firmwareVersion}"),
+                      _AboutChip(label: "Vendor: ${radio.deviceInfo?.vendorName ?? 'N/A'}"),
+                      _AboutChip(label: "Product: ${radio.deviceInfo?.productName ?? 'N/A'}"),
+                      _AboutChip(label: "HW: v${radio.deviceInfo?.hardwareVersion ?? 'N/A'}"),
+                      _AboutChip(label: "FW: v${radio.deviceInfo?.firmwareVersion ?? 'N/A'}"),
                     ],
                   ),
                 ],

@@ -3,10 +3,12 @@ import 'common.dart';
 import 'data_models.dart';
 import 'utils.dart';
 
+// Abstract base class for all message bodies.
 abstract class MessageBody {
   Uint8List toBytes();
 }
 
+// A generic body for commands that are not yet fully implemented.
 class UnknownBody extends MessageBody {
   final Uint8List data;
   UnknownBody({required this.data});
@@ -14,15 +16,17 @@ class UnknownBody extends MessageBody {
   Uint8List toBytes() => data;
 }
 
-// GET_DEV_INFO
+// --- GET_DEV_INFO ---
 class GetDevInfoBody extends MessageBody {
   @override
   Uint8List toBytes() => Uint8List.fromList([3]);
 }
+
 class GetDevInfoReplyBody extends MessageBody {
   final ReplyStatus replyStatus;
   final DeviceInfo? devInfo;
   GetDevInfoReplyBody({required this.replyStatus, this.devInfo});
+
   factory GetDevInfoReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
     final replyStatus = ReplyStatus.fromInt(r.readInt(8));
@@ -32,21 +36,68 @@ class GetDevInfoReplyBody extends MessageBody {
     );
   }
   @override
-  Uint8List toBytes() => throw UnimplementedError();
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
 }
 
-// READ_RF_CH
+// --- READ_SETTINGS ---
+class ReadSettingsBody extends MessageBody {
+  @override
+  Uint8List toBytes() => Uint8List(0);
+}
+
+class ReadSettingsReplyBody extends MessageBody {
+  final ReplyStatus replyStatus;
+  final Settings? settings;
+  ReadSettingsReplyBody({required this.replyStatus, this.settings});
+
+  factory ReadSettingsReplyBody.fromBytes(Uint8List bytes) {
+    final r = ByteReader(bytes);
+    final status = ReplyStatus.fromInt(r.readInt(8));
+    return ReadSettingsReplyBody(
+      replyStatus: status,
+      settings: status == ReplyStatus.SUCCESS ? Settings.fromBytes(r.readBytes(r.remainingBits ~/ 8)) : null,
+    );
+  }
+  @override
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
+}
+
+// --- WRITE_SETTINGS ---
+class WriteSettingsBody extends MessageBody {
+  final Settings settings;
+  WriteSettingsBody({required this.settings});
+
+  @override
+  Uint8List toBytes() => settings.toBytes();
+}
+
+class WriteSettingsReplyBody extends MessageBody {
+  final ReplyStatus replyStatus;
+  WriteSettingsReplyBody({required this.replyStatus});
+
+  factory WriteSettingsReplyBody.fromBytes(Uint8List bytes) {
+    return WriteSettingsReplyBody(replyStatus: ReplyStatus.fromInt(bytes[0]));
+  }
+
+  @override
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
+}
+
+
+// --- READ_RF_CH ---
 class ReadRFChBody extends MessageBody {
   final int channelId;
   ReadRFChBody({required this.channelId});
-  factory ReadRFChBody.fromBytes(Uint8List bytes) => ReadRFChBody(channelId: bytes[0]);
+
   @override
   Uint8List toBytes() => Uint8List.fromList([channelId]);
 }
+
 class ReadRFChReplyBody extends MessageBody {
   final ReplyStatus replyStatus;
   final Channel? rfCh;
   ReadRFChReplyBody({required this.replyStatus, this.rfCh});
+
   factory ReadRFChReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
     final status = ReplyStatus.fromInt(r.readInt(8));
@@ -56,35 +107,64 @@ class ReadRFChReplyBody extends MessageBody {
     );
   }
   @override
-  Uint8List toBytes() => throw UnimplementedError();
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
 }
 
-// GET_HT_STATUS
-class GetHtStatusBody extends MessageBody {
+// --- WRITE_RF_CH ---
+class WriteRFChBody extends MessageBody {
+  final Channel rfCh;
+  WriteRFChBody({required this.rfCh});
   @override
-  Uint8List toBytes() => Uint8List(0);
+  Uint8List toBytes() => rfCh.toBytes();
 }
-class GetHtStatusReplyBody extends MessageBody {
+class WriteRFChReplyBody extends MessageBody {
   final ReplyStatus replyStatus;
-  final StatusExt? status;
-  GetHtStatusReplyBody({required this.replyStatus, this.status});
-  factory GetHtStatusReplyBody.fromBytes(Uint8List bytes) {
+  final int channelId;
+  WriteRFChReplyBody({required this.replyStatus, required this.channelId});
+  factory WriteRFChReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
-    final status = ReplyStatus.fromInt(r.readInt(8));
-    return GetHtStatusReplyBody(
-      replyStatus: status,
-      status: status == ReplyStatus.SUCCESS ? StatusExt.fromBytes(r.readBytes(r.remainingBits ~/ 8)) : null,
+    return WriteRFChReplyBody(
+      replyStatus: ReplyStatus.fromInt(r.readInt(8)),
+      channelId: r.readInt(8),
     );
   }
   @override
   Uint8List toBytes() => throw UnimplementedError();
 }
 
-// READ_STATUS (for battery)
+
+// --- GET_HT_STATUS ---
+class GetHtStatusBody extends MessageBody {
+  @override
+  Uint8List toBytes() => Uint8List(0);
+}
+
+class GetHtStatusReplyBody extends MessageBody {
+  final ReplyStatus replyStatus;
+  final StatusExt? status;
+  GetHtStatusReplyBody({required this.replyStatus, this.status});
+
+  factory GetHtStatusReplyBody.fromBytes(Uint8List bytes) {
+    final r = ByteReader(bytes);
+    final status = ReplyStatus.fromInt(r.readInt(8));
+    // The body can be variable length, so we check if there's enough data for a status object.
+    if (status != ReplyStatus.SUCCESS || r.remainingBits < Status.bitLength) {
+       return GetHtStatusReplyBody(replyStatus: status, status: null);
+    }
+    return GetHtStatusReplyBody(
+      replyStatus: status,
+      status: StatusExt.fromBytes(r.readBytes(r.remainingBits ~/ 8)),
+    );
+  }
+  @override
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
+}
+
+// --- READ_STATUS (for battery) ---
 class ReadPowerStatusBody extends MessageBody {
   final PowerStatusType statusType;
   ReadPowerStatusBody({required this.statusType});
-  factory ReadPowerStatusBody.fromBytes(Uint8List bytes) => ReadPowerStatusBody(statusType: PowerStatusType.values.firstWhere((e) => e.value == bytes[0]));
+
   @override
   Uint8List toBytes() {
     final w = ByteWriter(2);
@@ -92,17 +172,19 @@ class ReadPowerStatusBody extends MessageBody {
     return w.toBytes();
   }
 }
+
 class ReadPowerStatusReplyBody extends MessageBody {
   final ReplyStatus replyStatus;
   final num? value;
   ReadPowerStatusReplyBody({required this.replyStatus, this.value});
+
   factory ReadPowerStatusReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
     final status = ReplyStatus.fromInt(r.readInt(8));
     if (status != ReplyStatus.SUCCESS || r.remainingBits < 16) {
       return ReadPowerStatusReplyBody(replyStatus: status);
     }
-    final type = PowerStatusType.values.firstWhere((e) => e.value == r.readInt(16));
+    final type = PowerStatusType.fromInt(r.readInt(16));
     num? val;
     if (type == PowerStatusType.BATTERY_VOLTAGE) {
       if (r.remainingBits >= 16) val = r.readInt(16) / 1000.0;
@@ -112,61 +194,71 @@ class ReadPowerStatusReplyBody extends MessageBody {
     return ReadPowerStatusReplyBody(replyStatus: status, value: val);
   }
   @override
-  Uint8List toBytes() => throw UnimplementedError();
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
 }
 
-// GET_POSITION
+// --- GET_POSITION ---
 class GetPositionBody extends MessageBody {
   @override
   Uint8List toBytes() => Uint8List(0);
 }
+
 class GetPositionReplyBody extends MessageBody {
   final ReplyStatus replyStatus;
   final Position? position;
   GetPositionReplyBody({required this.replyStatus, this.position});
+
   factory GetPositionReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
     final status = ReplyStatus.fromInt(r.readInt(8));
+     if (status != ReplyStatus.SUCCESS || r.remainingBits < Position.bitLength) {
+       return GetPositionReplyBody(replyStatus: status, position: null);
+    }
     return GetPositionReplyBody(
       replyStatus: status,
-      position: status == ReplyStatus.SUCCESS ? Position.fromBytes(r.readBytes(r.remainingBits ~/ 8)) : null,
+      position: Position.fromBytes(r.readBytes(r.remainingBits ~/ 8)),
     );
   }
   @override
-  Uint8List toBytes() => throw UnimplementedError();
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
 }
 
-// EVENT_NOTIFICATION
+// --- EVENT_NOTIFICATION ---
 class EventNotificationBody extends MessageBody {
   final EventType eventType;
   final MessageBody event;
   EventNotificationBody({required this.eventType, required this.event});
+
   factory EventNotificationBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
     final type = EventType.fromInt(r.readInt(8));
     MessageBody body;
     final remainingBytes = r.readBytes(r.remainingBits ~/ 8);
-    switch(type) {
+    switch (type) {
       case EventType.HT_STATUS_CHANGED:
         body = GetHtStatusReplyBody(replyStatus: ReplyStatus.SUCCESS, status: StatusExt.fromBytes(remainingBytes));
         break;
+      case EventType.HT_SETTINGS_CHANGED:
+         body = ReadSettingsReplyBody(replyStatus: ReplyStatus.SUCCESS, settings: Settings.fromBytes(remainingBytes));
+         break;
       case EventType.HT_CH_CHANGED:
         body = ReadRFChReplyBody(replyStatus: ReplyStatus.SUCCESS, rfCh: Channel.fromBytes(remainingBytes));
         break;
+      // Other events can be added here as needed.
       default:
         body = UnknownBody(data: remainingBytes);
     }
     return EventNotificationBody(eventType: type, event: body);
   }
   @override
-  Uint8List toBytes() => throw UnimplementedError();
+  Uint8List toBytes() => throw UnimplementedError("Reply bodies are not intended to be converted to bytes.");
 }
 
-// REGISTER_NOTIFICATION
+// --- REGISTER_NOTIFICATION ---
 class RegisterNotificationBody extends MessageBody {
   final EventType eventType;
   RegisterNotificationBody({required this.eventType});
-  factory RegisterNotificationBody.fromBytes(Uint8List bytes) => RegisterNotificationBody(eventType: EventType.fromInt(bytes[0]));
+
   @override
   Uint8List toBytes() => Uint8List.fromList([eventType.value]);
 }

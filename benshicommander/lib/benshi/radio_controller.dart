@@ -83,19 +83,19 @@ class RadioController extends ChangeNotifier {
         }
         break;
       case EventType.HT_SETTINGS_CHANGED:
-         final settingsReply = eventBody.event as ReadSettingsReplyBody;
-         if (settingsReply.settings != null) {
-            settings = settingsReply.settings;
-            dataChanged = true;
-         }
-         break;
+        final settingsReply = eventBody.event as ReadSettingsReplyBody;
+        if (settingsReply.settings != null) {
+           settings = settingsReply.settings;
+           dataChanged = true;
+        }
+        break;
       case EventType.HT_CH_CHANGED:
-         final channelReply = eventBody.event as ReadRFChReplyBody;
-         if (channelReply.rfCh != null) {
-            currentChannel = channelReply.rfCh;
-            dataChanged = true;
-         }
-         break;
+        final channelReply = eventBody.event as ReadRFChReplyBody;
+        if (channelReply.rfCh != null) {
+           currentChannel = channelReply.rfCh;
+           dataChanged = true;
+        }
+        break;
       default:
         if (kDebugMode) print("Unhandled Event: ${eventBody.eventType}");
     }
@@ -137,14 +137,14 @@ class RadioController extends ChangeNotifier {
   GaiaParseResult? _parseGaiaFrameFromBuffer() {
     int frameStart = _rxBuffer.indexOf(GaiaFrame.startByte);
     if (frameStart == -1) {
-        _rxBuffer = Uint8List(0);
-        return null;
+       _rxBuffer = Uint8List(0);
+       return null;
     }
     if (frameStart > 0) _rxBuffer = _rxBuffer.sublist(frameStart);
     if (_rxBuffer.length < 4) return null;
     if (_rxBuffer[1] != GaiaFrame.version) {
-        _rxBuffer = _rxBuffer.sublist(1);
-        return _parseGaiaFrameFromBuffer();
+       _rxBuffer = _rxBuffer.sublist(1);
+       return _parseGaiaFrameFromBuffer();
     }
     final messagePayloadLength = _rxBuffer[3];
     final fullMessageLength = messagePayloadLength + 4;
@@ -169,7 +169,8 @@ class RadioController extends ChangeNotifier {
     await connection?.output.allSent;
   }
 
-  Future<T> _sendCommandExpectReply<T extends MessageBody>({
+  // UPDATED to be more generic and reliable
+  Future<T> _sendCommandExpectReply<T extends ReplyBody>({
     required Message command,
     required BasicCommand replyCommand,
     Duration timeout = const Duration(seconds: 10),
@@ -181,10 +182,10 @@ class RadioController extends ChangeNotifier {
       if (message.command == replyCommand && message.isReply) {
         if (!completer.isCompleted) {
           final body = message.body as T;
-          if (body is GetDevInfoReplyBody && body.replyStatus != ReplyStatus.SUCCESS) {
-             completer.completeError(Exception("Command failed with status: ${body.replyStatus}"));
+          if (body.replyStatus != ReplyStatus.SUCCESS) {
+            completer.completeError(Exception("Command failed with status: ${body.replyStatus}"));
           } else {
-             completer.complete(body);
+            completer.complete(body);
           }
           streamSub.cancel();
         }
@@ -203,17 +204,18 @@ class RadioController extends ChangeNotifier {
     return completer.future;
   }
 
+
   Future<void> _registerForEvents() async {
     final eventsToRegister = [EventType.HT_STATUS_CHANGED, EventType.HT_SETTINGS_CHANGED, EventType.HT_CH_CHANGED];
     for (var eventType in eventsToRegister) {
        final command = Message(
-        commandGroup: CommandGroup.BASIC,
-        command: BasicCommand.REGISTER_NOTIFICATION,
-        isReply: false,
-        body: RegisterNotificationBody(eventType: eventType)
-      );
-      await _sendCommand(command);
-      await Future.delayed(const Duration(milliseconds: 50));
+         commandGroup: CommandGroup.BASIC,
+         command: BasicCommand.REGISTER_NOTIFICATION,
+         isReply: false,
+         body: RegisterNotificationBody(eventType: eventType)
+       );
+       await _sendCommand(command);
+       await Future.delayed(const Duration(milliseconds: 50));
     }
   }
 
@@ -226,7 +228,7 @@ class RadioController extends ChangeNotifier {
 
   /// Set VFO frequency by always operating on VFO channel (channelId 0)
   Future<void> setVfoFrequency(double frequency) async {
-    final vfoChannelId = 0;
+    const vfoChannelId = 0;
     final vfoChannel = await getChannel(vfoChannelId);
 
     final newChannel = vfoChannel.copyWith(
@@ -234,16 +236,27 @@ class RadioController extends ChangeNotifier {
       txFreq: frequency,
     );
 
-    final command = Message(
-      commandGroup: CommandGroup.BASIC,
-      command: BasicCommand.WRITE_RF_CH,
-      isReply: false,
-      body: WriteRFChBody(rfCh: newChannel)
-    );
-
-    await _sendCommand(command);
+    await writeChannel(newChannel);
     currentChannel = newChannel;
     notifyListeners();
+  }
+
+  // NEW: Writes a single channel's configuration to the radio.
+  Future<void> writeChannel(Channel channel) async {
+      final reply = await _sendCommandExpectReply<WriteRFChReplyBody>(
+          command: Message(
+              commandGroup: CommandGroup.BASIC,
+              command: BasicCommand.WRITE_RF_CH,
+              isReply: false,
+              body: WriteRFChBody(rfCh: channel)
+          ),
+          replyCommand: BasicCommand.WRITE_RF_CH,
+          timeout: const Duration(seconds: 3), // Writing can take a moment
+      );
+      // Error handling is now done in _sendCommandExpectReply
+      if (kDebugMode) {
+        print('Successfully wrote channel ${reply.channelId}');
+      }
   }
 
   Future<DeviceInfo> getDeviceInfo() async {
@@ -323,8 +336,8 @@ class RadioController extends ChangeNotifier {
     );
     if (reply.rfCh == null) throw Exception('Failed to get channel $channelId.');
     if (status?.currentChannelId == channelId) {
-        currentChannel = reply.rfCh;
-        notifyListeners();
+       currentChannel = reply.rfCh;
+       notifyListeners();
     }
     return reply.rfCh!;
   }

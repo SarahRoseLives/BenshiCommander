@@ -8,6 +8,13 @@ abstract class MessageBody {
   Uint8List toBytes();
 }
 
+// NEW: Abstract base class for all reply bodies to standardize status checking.
+abstract class ReplyBody extends MessageBody {
+  final ReplyStatus replyStatus;
+  ReplyBody({required this.replyStatus});
+}
+
+
 // A generic body for commands that are not yet fully implemented.
 class UnknownBody extends MessageBody {
   final Uint8List data;
@@ -22,10 +29,9 @@ class GetDevInfoBody extends MessageBody {
   Uint8List toBytes() => Uint8List.fromList([3]);
 }
 
-class GetDevInfoReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class GetDevInfoReplyBody extends ReplyBody {
   final DeviceInfo? devInfo;
-  GetDevInfoReplyBody({required this.replyStatus, this.devInfo});
+  GetDevInfoReplyBody({required super.replyStatus, this.devInfo});
 
   factory GetDevInfoReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
@@ -45,10 +51,9 @@ class ReadSettingsBody extends MessageBody {
   Uint8List toBytes() => Uint8List(0);
 }
 
-class ReadSettingsReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class ReadSettingsReplyBody extends ReplyBody {
   final Settings? settings;
-  ReadSettingsReplyBody({required this.replyStatus, this.settings});
+  ReadSettingsReplyBody({required super.replyStatus, this.settings});
 
   factory ReadSettingsReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
@@ -71,9 +76,8 @@ class WriteSettingsBody extends MessageBody {
   Uint8List toBytes() => settings.toBytes();
 }
 
-class WriteSettingsReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
-  WriteSettingsReplyBody({required this.replyStatus});
+class WriteSettingsReplyBody extends ReplyBody {
+  WriteSettingsReplyBody({required super.replyStatus});
 
   factory WriteSettingsReplyBody.fromBytes(Uint8List bytes) {
     return WriteSettingsReplyBody(replyStatus: ReplyStatus.fromInt(bytes[0]));
@@ -93,10 +97,9 @@ class ReadRFChBody extends MessageBody {
   Uint8List toBytes() => Uint8List.fromList([channelId]);
 }
 
-class ReadRFChReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class ReadRFChReplyBody extends ReplyBody {
   final Channel? rfCh;
-  ReadRFChReplyBody({required this.replyStatus, this.rfCh});
+  ReadRFChReplyBody({required super.replyStatus, this.rfCh});
 
   factory ReadRFChReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
@@ -117,10 +120,9 @@ class WriteRFChBody extends MessageBody {
   @override
   Uint8List toBytes() => rfCh.toBytes();
 }
-class WriteRFChReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class WriteRFChReplyBody extends ReplyBody {
   final int channelId;
-  WriteRFChReplyBody({required this.replyStatus, required this.channelId});
+  WriteRFChReplyBody({required super.replyStatus, required this.channelId});
   factory WriteRFChReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
     return WriteRFChReplyBody(
@@ -139,10 +141,9 @@ class GetHtStatusBody extends MessageBody {
   Uint8List toBytes() => Uint8List(0);
 }
 
-class GetHtStatusReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class GetHtStatusReplyBody extends ReplyBody {
   final StatusExt? status;
-  GetHtStatusReplyBody({required this.replyStatus, this.status});
+  GetHtStatusReplyBody({required super.replyStatus, this.status});
 
   factory GetHtStatusReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
@@ -173,10 +174,9 @@ class ReadPowerStatusBody extends MessageBody {
   }
 }
 
-class ReadPowerStatusReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class ReadPowerStatusReplyBody extends ReplyBody {
   final num? value;
-  ReadPowerStatusReplyBody({required this.replyStatus, this.value});
+  ReadPowerStatusReplyBody({required super.replyStatus, this.value});
 
   factory ReadPowerStatusReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
@@ -203,10 +203,9 @@ class GetPositionBody extends MessageBody {
   Uint8List toBytes() => Uint8List(0);
 }
 
-class GetPositionReplyBody extends MessageBody {
-  final ReplyStatus replyStatus;
+class GetPositionReplyBody extends ReplyBody {
   final Position? position;
-  GetPositionReplyBody({required this.replyStatus, this.position});
+  GetPositionReplyBody({required super.replyStatus, this.position});
 
   factory GetPositionReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
@@ -239,8 +238,8 @@ class EventNotificationBody extends MessageBody {
         body = GetHtStatusReplyBody(replyStatus: ReplyStatus.SUCCESS, status: StatusExt.fromBytes(remainingBytes));
         break;
       case EventType.HT_SETTINGS_CHANGED:
-         body = ReadSettingsReplyBody(replyStatus: ReplyStatus.SUCCESS, settings: Settings.fromBytes(remainingBytes));
-         break;
+        body = ReadSettingsReplyBody(replyStatus: ReplyStatus.SUCCESS, settings: Settings.fromBytes(remainingBytes));
+        break;
       case EventType.HT_CH_CHANGED:
         body = ReadRFChReplyBody(replyStatus: ReplyStatus.SUCCESS, rfCh: Channel.fromBytes(remainingBytes));
         break;

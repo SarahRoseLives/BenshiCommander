@@ -59,6 +59,12 @@ class Message {
         case BasicCommand.READ_RF_CH:
           parsedBody = isReply ? ReadRFChReplyBody.fromBytes(bodyBytes) : ReadRFChBody(channelId: bodyBytes[0]);
           break;
+        // ADDED case for handling write replies
+        case BasicCommand.WRITE_RF_CH:
+            parsedBody = isReply
+                ? WriteRFChReplyBody.fromBytes(bodyBytes)
+                : WriteRFChBody(rfCh: Channel.fromBytes(bodyBytes));
+            break;
         case BasicCommand.GET_HT_STATUS:
           parsedBody = isReply ? GetHtStatusReplyBody.fromBytes(bodyBytes) : GetHtStatusBody();
           break;

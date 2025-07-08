@@ -71,7 +71,7 @@
 │   ├── programmer_view.dart   # Chirp export (write/edit planned)
 │   └── scanner_view.dart      # (Planned) Channel scan/log
 └── services/
-    └── chirp_exporter.dart    # Chirp CSV export via web server
+    └── web_programmer.dart    # Chirp CSV export via web server
 ```
 
 ---

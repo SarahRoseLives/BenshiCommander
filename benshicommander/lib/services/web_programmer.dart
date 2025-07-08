@@ -104,9 +104,11 @@ class ChirpExporter {
 
       onStatusUpdate('Channel ${channelId + 1} updated from web. Writing to radio...');
       await radioController.writeChannel(updatedChannel);
-      onStatusUpdate('Successfully wrote channel ${channelId + 1} from web.');
+      onStatusUpdate('Successfully wrote channel ${channelId + 1}. Refreshing app list...');
 
-      onChannelsUpdatedFromWeb?.call([updatedChannel]);
+      // FIX: Fetch the full, updated list from the radio to ensure UI consistency.
+      final fullChannelList = await radioController.getAllChannels();
+      onChannelsUpdatedFromWeb?.call(fullChannelList);
 
       return Response.ok(jsonEncode({'ok': true}));
     } catch (e) {
@@ -124,13 +126,20 @@ class ChirpExporter {
       onStatusUpdate('Starting bulk write of ${channelList.length} channels...');
 
       List<Channel> updatedChannelsForApp = [];
+      // To get the base channel info, we need the full list from the radio first.
+      final currentRadioChannels = await radioController.getAllChannels();
+      final radioChannelsMap = {for (var c in currentRadioChannels) c.channelId: c};
+
 
       for (int i = 0; i < channelList.length; i++) {
         final Map<String, dynamic> channelData = channelList[i];
         final int originalId = channelData['channelId'];
 
         // Get the original channel to preserve non-editable fields
-        final originalChannel = await radioController.getChannel(originalId);
+      final originalChannel = radioChannelsMap[originalId];
+      if (originalChannel == null) {
+          throw Exception("Could not find original channel with id $originalId during bulk write.");
+      }
 
         // Create the updated channel object, but with the *new* channelId (i)
         final updatedChannel = _channelFromMap(originalChannel, channelData).copyWith(channelId: i);

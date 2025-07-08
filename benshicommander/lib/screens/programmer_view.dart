@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import '../benshi/radio_controller.dart';
 import '../benshi/protocol/protocol.dart';
 import '../services/web_programmer.dart';
+import '../services/memory_storage_service.dart';
 
 class ProgrammerView extends StatefulWidget {
   final RadioController radioController;
@@ -15,13 +18,16 @@ class ProgrammerView extends StatefulWidget {
 class _ProgrammerViewState extends State<ProgrammerView> {
   late final ChirpExporter _chirpExporter;
 
-  // UI State
   List<Channel>? _channels;
   bool _isLoading = false;
   String _statusMessage = 'Read channels from the radio to begin editing.';
-  // State for tracking changes
   final Set<int> _modifiedChannelIds = {};
   bool _orderHasChanged = false;
+
+  // Backup management
+  List<MemoryBackup> _backups = [];
+  List<MemoryBackup> _preloadAssets = [];
+  bool _loadingBackups = true;
 
   @override
   void initState() {
@@ -31,17 +37,33 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       onStatusUpdate: (message) {
         if (mounted) setState(() {});
       },
-      onChannelsUpdatedFromWeb: (updatedChannels) {
-        if (mounted && _channels != null) {
+      // FIX: The callback now correctly accepts a List<Channel>
+      onChannelsUpdatedFromWeb: (List<Channel> updatedChannels) {
+        if (mounted) {
           setState(() {
+            // After a web update, the server has written to the radio.
+            // The returned list is the new source of truth. We replace our local list with it.
             _channels = updatedChannels;
-            _modifiedChannelIds.clear();
-            _orderHasChanged = true;
-            _statusMessage = "Channels updated from web. Review and write to radio.";
+            _modifiedChannelIds.clear(); // All changes are considered saved.
+            _orderHasChanged = false;    // The order is now synced.
+            _statusMessage = "Radio memory synced from web programmer.";
           });
         }
       },
     );
+    _refreshBackups();
+    _loadPreloadAssets();
+  }
+
+  Future<void> _refreshBackups() async {
+    setState(() => _loadingBackups = true);
+    _backups = await MemoryStorageService().listBackups();
+    setState(() => _loadingBackups = false);
+  }
+
+  Future<void> _loadPreloadAssets() async {
+    _preloadAssets = await MemoryStorageService().listPreloadAssets();
+    setState(() {});
   }
 
   @override
@@ -78,13 +100,75 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     }
   }
 
+  // BACKUP MEMORY: Save
+  Future<void> _backupToPhone() async {
+    if (_channels == null) return;
+    final name = await _promptForName(context, "Name this backup:");
+    if (name == null || name.trim().isEmpty) return;
+    await MemoryStorageService().saveBackup(name, _channels!);
+    await _refreshBackups();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Backup "$name" saved.')));
+    }
+  }
+
+  // BACKUP MEMORY: Restore
+  Future<void> _restoreBackup(MemoryBackup backup) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Restore Memory List?'),
+        content: Text('This will load "${backup.name}" and allow you to write it to your radio. Proceed?'),
+        actions: [
+          TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(context).pop(false)),
+          TextButton(child: const Text('Load'), onPressed: () => Navigator.of(context).pop(true)),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() {
+      _channels = backup.channels;
+      _modifiedChannelIds.clear();
+      _orderHasChanged = true;
+      _statusMessage = 'Loaded backup: ${backup.name}';
+    });
+  }
+
+  // BACKUP MEMORY: Delete
+  Future<void> _deleteBackup(MemoryBackup backup) async {
+    await MemoryStorageService().deleteBackup(backup);
+    await _refreshBackups();
+  }
+
+  // PRELOAD: Load asset
+  Future<void> _loadPreloadAsset(MemoryBackup asset) async {
+    setState(() {
+      _channels = asset.channels;
+      _modifiedChannelIds.clear();
+      _orderHasChanged = true;
+      _statusMessage = 'Loaded preloaded list: ${asset.name}';
+    });
+  }
+
+  // NEW EMPTY LIST
+  Future<void> _createNewList() async {
+    setState(() {
+      _channels = [];
+      _modifiedChannelIds.clear();
+      _orderHasChanged = true;
+      _statusMessage = "Created new empty memory list.";
+    });
+  }
+
   // Writes only individually modified channels
   Future<void> _writeModifiedChannelsToRadio() async {
     if (_isLoading || _channels == null || _modifiedChannelIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('No modified channels to write.'),
-        backgroundColor: Colors.orange,
-      ));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No modified channels to write.'),
+          backgroundColor: Colors.orange,
+        ));
+      }
       return;
     }
 
@@ -116,7 +200,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     });
   }
 
-  // Writes ALL channels in their new order. Crucial after reordering.
   Future<void> _writeAllChannelsToRadio() async {
     if (_isLoading || _channels == null) return;
 
@@ -124,7 +207,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirm Write All'),
-        content: Text('This will overwrite all ${ _channels!.length} channels on the radio with the current order and settings. Are you sure?'),
+        content: Text('This will overwrite all ${_channels!.length} channels on the radio with the current order and settings. Are you sure?'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Write All')),
@@ -140,7 +223,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
 
     for (int i = 0; i < _channels!.length; i++) {
       final oldChannel = _channels![i];
-      // Create a new channel object with the updated channelId (its new index)
       final channelToWrite = oldChannel.copyWith(channelId: i);
 
       try {
@@ -150,19 +232,17 @@ class _ProgrammerViewState extends State<ProgrammerView> {
         await Future.delayed(const Duration(milliseconds: 50));
       } catch (e) {
         errorCount++;
-         _updateStatus('Error writing to slot ${i + 1}: $e');
-        break; // Stop on first error
+        _updateStatus('Error writing to slot ${i + 1}: $e');
+        break;
       }
     }
 
     setState(() {
       _isLoading = false;
       _statusMessage = 'Full write complete. Success: $successCount, Failed: $errorCount.';
-      // After a full write, all changes are saved.
       _modifiedChannelIds.clear();
       _orderHasChanged = false;
     });
-    // It's good practice to re-read to ensure perfect sync.
     await _readChannelsFromRadio();
   }
 
@@ -196,6 +276,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
           child: _channels == null ? _buildInitialView() : _buildProgrammerView(),
         ),
         _buildChirpExportCard(),
+        _buildMemoryLibraryCard(),
       ],
     );
   }
@@ -273,7 +354,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
                 leading: CircleAvatar(
                   backgroundColor: isModified ? Colors.orange.shade100 : Colors.blue.shade50,
                   child: Text(
-                    (index + 1).toString(), // Display index-based location
+                    (index + 1).toString(),
                     style: TextStyle(color: isModified ? Colors.orange.shade800 : Colors.blue.shade800),
                   ),
                 ),
@@ -319,7 +400,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
                 label: const Text('Read Again'),
                 onPressed: _readChannelsFromRadio,
               ),
-              // Show "Write All" if order changed, otherwise show "Write Changes"
               if (_orderHasChanged)
                 ElevatedButton.icon(
                   icon: const Icon(Icons.save_as),
@@ -351,43 +431,146 @@ class _ProgrammerViewState extends State<ProgrammerView> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(
-                _chirpExporter.isRunning
-                    ? 'Server is running. Open this address in a web browser on the same network:'
-                    : 'Start the server to edit channels over your local network.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              if (_chirpExporter.isRunning && _chirpExporter.serverUrl != null)
-                SelectableText(
-                  _chirpExporter.serverUrl!,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  _chirpExporter.isRunning
+                      ? 'Server is running. Open this address in a web browser on the same network:'
+                      : 'Start the server to edit channels over your local network.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple,
+                ),
+                const SizedBox(height: 8),
+                if (_chirpExporter.isRunning && _chirpExporter.serverUrl != null)
+                  SelectableText(
+                    _chirpExporter.serverUrl!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple,
+                    ),
                   ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    if (_chirpExporter.isRunning) {
+                      _chirpExporter.stop();
+                    } else {
+                      _chirpExporter.start();
+                    }
+                    setState(() {});
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        _chirpExporter.isRunning ? Colors.redAccent : Colors.green,
+                  ),
+                  child: Text(_chirpExporter.isRunning ? 'Stop Server' : 'Start Server'),
                 ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {
-                  if (_chirpExporter.isRunning) {
-                    _chirpExporter.stop();
-                  } else {
-                    _chirpExporter.start();
-                  }
-                  setState(() {});
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      _chirpExporter.isRunning ? Colors.redAccent : Colors.green,
-                ),
-                child: Text(_chirpExporter.isRunning ? 'Stop Server' : 'Start Server'),
-              ),
-            ]),
+              ],
+            ),
           )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemoryLibraryCard() {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+      child: ExpansionTile(
+        leading: const Icon(Icons.save),
+        title: const Text('Memory Library'),
+        subtitle: const Text('Save & restore radio memory lists'),
+        children: [
+          if (_channels != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.backup),
+                label: const Text('Backup current to phone'),
+                onPressed: _backupToPhone,
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4),
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.note_add),
+              label: const Text('New empty memory list'),
+              onPressed: _createNewList,
+            ),
+          ),
+          if (_preloadAssets.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Preloaded Templates:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  for (final asset in _preloadAssets)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.star, color: Colors.amber, size: 20),
+                      title: Text(asset.name),
+                      trailing: ElevatedButton(
+                        onPressed: () => _loadPreloadAsset(asset),
+                        child: const Text('Load'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (_loadingBackups)
+            const Padding(
+              padding: EdgeInsets.all(12.0),
+              child: LinearProgressIndicator(),
+            ),
+          if (_backups.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Saved Backups:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  for (final backup in _backups)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.save_alt, size: 20),
+                      title: Text(backup.name),
+                      subtitle: Text(backup.dateString),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ElevatedButton(
+                            onPressed: () => _restoreBackup(backup),
+                            child: const Text('Load'),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteBackup(backup),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _promptForName(BuildContext context, String prompt) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(prompt),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('OK')),
         ],
       ),
     );

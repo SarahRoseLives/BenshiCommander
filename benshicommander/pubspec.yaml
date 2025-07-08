@@ -41,6 +41,7 @@ dependencies:
   network_info_plus: ^5.0.3
   csv: ^6.0.0
   intl: ^0.19.0
+  path_provider: ^2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -63,6 +64,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/memorylists/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

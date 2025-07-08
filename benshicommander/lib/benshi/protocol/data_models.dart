@@ -404,6 +404,73 @@ class Channel {
     );
   }
 
+  // ADDED: toJson method for serialization
+  Map<String, dynamic> toJson() => {
+    'channelId': channelId,
+    'txMod': txMod.index,
+    'txFreq': txFreq,
+    'rxMod': rxMod.index,
+    'rxFreq': rxFreq,
+    'txSubAudio': txSubAudio,
+    'rxSubAudio': rxSubAudio,
+    'scan': scan,
+    'txAtMaxPower': txAtMaxPower,
+    'txAtMedPower': txAtMedPower,
+    'bandwidth': bandwidth.index,
+    'name': name,
+    'talkAround': talkAround,
+    'preDeEmphBypass': preDeEmphBypass,
+    'sign': sign,
+    'txDisable': txDisable,
+    'fixedFreq': fixedFreq,
+    'fixedBandwidth': fixedBandwidth,
+    'fixedTxPower': fixedTxPower,
+    'mute': mute,
+  };
+
+  // MODIFIED: fromJson factory for deserialization to handle multiple data types
+  factory Channel.fromJson(Map<String, dynamic> json) {
+    // Helper to safely parse enum from either int (index) or String (name)
+    T _parseEnum<T extends Enum>(List<T> values, dynamic value, T defaultValue) {
+      if (value == null) return defaultValue;
+      if (value is int && value >= 0 && value < values.length) {
+        return values[value];
+      }
+      if (value is String) {
+        for (var enumValue in values) {
+          if (enumValue.name.toLowerCase() == value.toLowerCase()) {
+            return enumValue;
+          }
+        }
+      }
+      return defaultValue; // Fallback
+    }
+
+    return Channel(
+      channelId: json['channelId'],
+      txMod: _parseEnum(ModulationType.values, json['txMod'], ModulationType.FM),
+      txFreq: (json['txFreq'] as num).toDouble(),
+      rxMod: _parseEnum(ModulationType.values, json['rxMod'], ModulationType.FM),
+      rxFreq: (json['rxFreq'] as num).toDouble(),
+      txSubAudio: json['txSubAudio'],
+      rxSubAudio: json['rxSubAudio'],
+      scan: json['scan'],
+      txAtMaxPower: json['txAtMaxPower'],
+      txAtMedPower: json['txAtMedPower'],
+      bandwidth: _parseEnum(BandwidthType.values, json['bandwidth'], BandwidthType.NARROW),
+      name: json['name'],
+      talkAround: json['talkAround'] ?? false,
+      preDeEmphBypass: json['preDeEmphBypass'] ?? false,
+      sign: json['sign'] ?? false,
+      txDisable: json['txDisable'] ?? false,
+      fixedFreq: json['fixedFreq'] ?? false,
+      fixedBandwidth: json['fixedBandwidth'] ?? false,
+      fixedTxPower: json['fixedTxPower'] ?? false,
+      mute: json['mute'] ?? false,
+    );
+  }
+
+
   static dynamic _parseSubAudio(int val) {
     if (val == 0) return null;
     if (val < 6700) return val; // DCS code

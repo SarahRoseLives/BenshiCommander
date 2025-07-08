@@ -229,6 +229,8 @@ class Position {
   }
 }
 
+// REPLACE the ENTIRE Channel class with the code below.
+
 class Channel {
   final int channelId;
   final ModulationType txMod;
@@ -243,14 +245,14 @@ class Channel {
   final BandwidthType bandwidth;
   final String name;
 
-  // Added fields for serialization that are not always used in UI
+  // These fields are now correctly used in toBytes()
   final bool talkAround;
   final bool preDeEmphBypass;
   final bool sign;
   final bool txDisable;
-  final bool fixed_freq;
-  final bool fixed_bandwidth;
-  final bool fixed_tx_power;
+  final bool fixedFreq;
+  final bool fixedBandwidth;
+  final bool fixedTxPower;
   final bool mute;
 
   Channel({
@@ -270,9 +272,9 @@ class Channel {
     this.preDeEmphBypass = false,
     this.sign = false,
     this.txDisable = false,
-    this.fixed_freq = false,
-    this.fixed_bandwidth = false,
-    this.fixed_tx_power = false,
+    this.fixedFreq = false,
+    this.fixedBandwidth = false,
+    this.fixedTxPower = false,
     this.mute = false,
   });
 
@@ -293,9 +295,9 @@ class Channel {
     final sign = r.readBool();
     final txAtMedPower = r.readBool();
     final txDisable = r.readBool();
-    final fixed_freq = r.readBool();
-    final fixed_bandwidth = r.readBool();
-    final fixed_tx_power = r.readBool();
+    final fixedFreq = r.readBool();
+    final fixedBandwidth = r.readBool();
+    final fixedTxPower = r.readBool();
     final mute = r.readBool();
     r.skipBits(4); // padding
     final name = r.readString(10);
@@ -317,9 +319,9 @@ class Channel {
       txAtMedPower: txAtMedPower,
       txDisable: txDisable,
       name: name,
-      fixed_freq: fixed_freq,
-      fixed_bandwidth: fixed_bandwidth,
-      fixed_tx_power: fixed_tx_power,
+      fixedFreq: fixedFreq,
+      fixedBandwidth: fixedBandwidth,
+      fixedTxPower: fixedTxPower,
       mute: mute,
     );
   }
@@ -332,7 +334,7 @@ class Channel {
   }
 
   Uint8List toBytes() {
-    final writer = ByteWriter(26); // 208 bits
+    final writer = ByteWriter(25); // 25 bytes = 208 bits
     writer.writeInt(channelId, 8);
     writer.writeInt(txMod.index, 2);
     writer.writeInt((txFreq * 1e6).round(), 30);
@@ -348,41 +350,59 @@ class Channel {
     writer.writeBool(sign);
     writer.writeBool(txAtMedPower);
     writer.writeBool(txDisable);
-    // FIX: Use the actual values from the Channel object instead of hardcoding false.
-    writer.writeBool(fixed_freq);
-    writer.writeBool(fixed_bandwidth);
-    writer.writeBool(fixed_tx_power);
+    writer.writeBool(fixedFreq);
+    writer.writeBool(fixedBandwidth);
+    writer.writeBool(fixedTxPower);
     writer.writeBool(mute);
     writer.writeInt(0, 4); // padding
-    writer.writeBytes(utf8.encode(name.padRight(10, '\u0000')));
+    // Correctly handle name encoding to be exactly 10 bytes
+    writer.writeBytes(utf8.encode(name.padRight(10, '\u0000').substring(0, 10)));
     return writer.toBytes();
   }
 
   Channel copyWith({
-    double? rxFreq,
+    int? channelId,
+    ModulationType? txMod,
     double? txFreq,
+    ModulationType? rxMod,
+    double? rxFreq,
+    dynamic txSubAudio,
+    dynamic rxSubAudio,
+    bool? scan,
+    bool? txAtMaxPower,
+    bool? txAtMedPower,
+    BandwidthType? bandwidth,
+    String? name,
+    bool? talkAround,
+    bool? preDeEmphBypass,
+    bool? sign,
+    bool? txDisable,
+    bool? fixedFreq,
+    bool? fixedBandwidth,
+    bool? fixedTxPower,
+    bool? mute,
   }) {
     return Channel(
-      channelId: channelId,
-      txMod: txMod,
+      channelId: channelId ?? this.channelId,
+      txMod: txMod ?? this.txMod,
       txFreq: txFreq ?? this.txFreq,
-      rxMod: rxMod,
+      rxMod: rxMod ?? this.rxMod,
       rxFreq: rxFreq ?? this.rxFreq,
-      txSubAudio: txSubAudio,
-      rxSubAudio: rxSubAudio,
-      scan: scan,
-      txAtMaxPower: txAtMaxPower,
-      txAtMedPower: txAtMedPower,
-      bandwidth: bandwidth,
-      name: name,
-      talkAround: talkAround,
-      preDeEmphBypass: preDeEmphBypass,
-      sign: sign,
-      txDisable: txDisable,
-      fixed_freq: fixed_freq,
-      fixed_bandwidth: fixed_bandwidth,
-      fixed_tx_power: fixed_tx_power,
-      mute: mute,
+      txSubAudio: txSubAudio, // Use the new value directly
+      rxSubAudio: rxSubAudio, // Use the new value directly
+      scan: scan ?? this.scan,
+      txAtMaxPower: txAtMaxPower ?? this.txAtMaxPower,
+      txAtMedPower: txAtMedPower ?? this.txAtMedPower,
+      bandwidth: bandwidth ?? this.bandwidth,
+      name: name ?? this.name,
+      talkAround: talkAround ?? this.talkAround,
+      preDeEmphBypass: preDeEmphBypass ?? this.preDeEmphBypass,
+      sign: sign ?? this.sign,
+      txDisable: txDisable ?? this.txDisable,
+      fixedFreq: fixedFreq ?? this.fixedFreq,
+      fixedBandwidth: fixedBandwidth ?? this.fixedBandwidth,
+      fixedTxPower: fixedTxPower ?? this.fixedTxPower,
+      mute: mute ?? this.mute,
     );
   }
 

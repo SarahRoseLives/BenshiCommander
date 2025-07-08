@@ -27,12 +27,20 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     _chirpExporter = ChirpExporter(
       radioController: widget.radioController,
       onStatusUpdate: (message) {
-        if (mounted) {
+        if (mounted) setState(() {});
+      },
+      onChannelUpdatedFromWeb: (updatedChannel) {
+        if (mounted && _channels != null) {
           setState(() {
-            // This is for the ChirpExporter's own status, not the main view status
+            final index = _channels!.indexWhere((c) => c.channelId == updatedChannel.channelId);
+            if (index != -1) {
+              _channels![index] = updatedChannel;
+              _modifiedChannelIds.add(updatedChannel.channelId);
+              _statusMessage = "Channel ${updatedChannel.channelId + 1} updated from web.";
+            }
           });
         }
-      },
+      }
     );
   }
 
@@ -83,25 +91,25 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     int successCount = 0;
     int errorCount = 0;
     List<int> successfullyWrittenIds = [];
+    final channelsToWrite = _channels!.where((c) => _modifiedChannelIds.contains(c.channelId)).toList();
 
-    for (final channelId in _modifiedChannelIds) {
-      final channel = _channels!.firstWhere((c) => c.channelId == channelId);
+    for (final channel in channelsToWrite) {
       try {
-        _updateStatus('Writing channel ${channelId + 1}...');
+        _updateStatus('Writing channel ${channel.channelId + 1}...');
         await widget.radioController.writeChannel(channel);
         successCount++;
-        successfullyWrittenIds.add(channelId);
-        await Future.delayed(const Duration(milliseconds: 50)); // Small delay between writes
+        successfullyWrittenIds.add(channel.channelId);
+        await Future.delayed(const Duration(milliseconds: 100)); // Small delay between writes
       } catch (e) {
         errorCount++;
-        _updateStatus('Error writing channel ${channelId + 1}: $e');
+        _updateStatus('Error writing channel ${channel.channelId + 1}: $e');
+        break; // Stop on first error
       }
     }
 
     setState(() {
       _isLoading = false;
       _statusMessage = 'Write complete. Success: $successCount, Failed: $errorCount.';
-      // Remove only the successfully written channels from the modified set
       _modifiedChannelIds.removeWhere((id) => successfullyWrittenIds.contains(id));
     });
   }
@@ -116,7 +124,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       builder: (context) => _EditChannelDialog(channel: originalChannel),
     );
 
-    if (updatedChannel != null && updatedChannel != originalChannel) {
+    if (updatedChannel != null) {
       setState(() {
         _channels![index] = updatedChannel;
         _modifiedChannelIds.add(updatedChannel.channelId);
@@ -230,7 +238,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
             },
           ),
         ),
-        // FIX: Added the action buttons back into the view's layout
         const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
@@ -395,32 +402,18 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
       return null;
     }
 
-    final updatedChannel = Channel(
-      channelId: widget.channel.channelId,
+    final updatedChannel = widget.channel.copyWith(
       name: _nameController.text,
-      rxFreq: double.tryParse(_rxFreqController.text) ?? widget.channel.rxFreq,
-      txFreq: double.tryParse(_txFreqController.text) ?? widget.channel.txFreq,
+      rxFreq: double.tryParse(_rxFreqController.text),
+      txFreq: double.tryParse(_txFreqController.text),
       bandwidth: _bandwidth,
       scan: _scan,
-      // Convert power string back to booleans
       txAtMaxPower: _power == 'High',
       txAtMedPower: _power == 'Medium',
-      // Parse sub-audio tones
       rxSubAudio: parseSubAudio(_rxToneType, _rxToneController.text),
       txSubAudio: parseSubAudio(_txToneType, _txToneController.text),
-      // Copy other properties from the original channel
-      txMod: widget.channel.txMod, // Assume FM for now
-      rxMod: widget.channel.rxMod,
-      // Copy fixed properties
-      talkAround: widget.channel.talkAround,
-      preDeEmphBypass: widget.channel.preDeEmphBypass,
-      sign: widget.channel.sign,
-      txDisable: widget.channel.txDisable,
-      fixed_freq: widget.channel.fixed_freq,
-      fixed_bandwidth: widget.channel.fixed_bandwidth,
-      fixed_tx_power: widget.channel.fixed_tx_power,
-      mute: widget.channel.mute,
     );
+
     Navigator.of(context).pop(updatedChannel);
   }
 

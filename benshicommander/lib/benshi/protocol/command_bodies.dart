@@ -121,15 +121,23 @@ class WriteRFChBody extends MessageBody {
   Uint8List toBytes() => rfCh.toBytes();
 }
 class WriteRFChReplyBody extends ReplyBody {
-  final int channelId;
-  WriteRFChReplyBody({required super.replyStatus, required this.channelId});
+  final int? channelId; // FIX: Make channelId nullable
+  WriteRFChReplyBody({required super.replyStatus, this.channelId});
+
   factory WriteRFChReplyBody.fromBytes(Uint8List bytes) {
     final r = ByteReader(bytes);
+    final status = ReplyStatus.fromInt(r.readInt(8));
+    int? chId;
+    // FIX: Only read channelId if status is SUCCESS and data is available
+    if (status == ReplyStatus.SUCCESS && r.remainingBits >= 8) {
+      chId = r.readInt(8);
+    }
     return WriteRFChReplyBody(
-      replyStatus: ReplyStatus.fromInt(r.readInt(8)),
-      channelId: r.readInt(8),
+      replyStatus: status,
+      channelId: chId,
     );
   }
+
   @override
   Uint8List toBytes() => throw UnimplementedError();
 }

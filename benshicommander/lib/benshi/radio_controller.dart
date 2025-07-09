@@ -4,8 +4,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'protocol/protocol.dart';
 
+// --- NEW: import AudioController ---
+import 'audio_controller.dart';
+
 class RadioController extends ChangeNotifier {
-  final BluetoothConnection? connection;
+  // MODIFIED: Store the full device instead of just connection
+  final BluetoothDevice device;
+  BluetoothConnection? _commandConnection;
+
+  // --- NEW: AudioController reference ---
+  AudioController? _audioController;
+
   final StreamController<Message> _messageStreamController = StreamController<Message>.broadcast();
   StreamSubscription? _btStreamSubscription;
   Uint8List _rxBuffer = Uint8List(0);
@@ -33,11 +42,25 @@ class RadioController extends ChangeNotifier {
   bool get isGpsLocked => status?.isGpsLocked ?? false;
   bool get supportsVfo => deviceInfo?.supportsVfo ?? false;
 
-  RadioController({this.connection}) {
-    if (connection != null) {
-      _btStreamSubscription = connection!.input!.listen(_onDataReceived);
-      _initializeRadioState();
-    }
+  // --- NEW Audio State ---
+  bool isAudioMonitoring = false;
+
+  // MODIFIED: Update constructor to take the device
+  RadioController({required this.device});
+
+  // NEW: Method to establish the command connection
+  Future<void> connect() async {
+    if (_commandConnection?.isConnected ?? false) return;
+    _commandConnection = await BluetoothConnection.toAddress(device.address);
+    _btStreamSubscription = _commandConnection!.input!.listen(_onDataReceived);
+    _initializeRadioState();
+
+    // IMPORTANT: You must find the correct RFCOMM channel for audio.
+    // It's often channel 2 or 3 if commands are on 1, but this varies.
+    // Tools like `sdptool records <device_address>` on Linux can find this.
+    // For now, we'll hardcode a common value like `2`.
+    _audioController = AudioController(deviceAddress: device.address, rfcommChannel: 4);
+    notifyListeners();
   }
 
   void _onDataReceived(Uint8List data) {
@@ -165,8 +188,8 @@ class RadioController extends ChangeNotifier {
     if (kDebugMode) {
       print("RAW TX: $bytes");
     }
-    connection?.output.add(bytes);
-    await connection?.output.allSent;
+    _commandConnection?.output.add(bytes);
+    await _commandConnection?.output.allSent;
   }
 
   // UPDATED to be more generic and reliable
@@ -405,10 +428,36 @@ class RadioController extends ChangeNotifier {
     }
   }
 
+  // --- NEW Public Methods for Audio Control ---
+
+  Future<void> startAudioMonitor() async {
+    if (_audioController == null) return;
+    await _audioController!.startMonitoring();
+    isAudioMonitoring = _audioController!.isMonitoring;
+    notifyListeners();
+  }
+
+  Future<void> stopAudioMonitor() async {
+    if (_audioController == null) return;
+    await _audioController!.stopMonitoring();
+    isAudioMonitoring = _audioController!.isMonitoring;
+    notifyListeners();
+  }
+
+  Future<void> toggleAudioMonitor() async {
+    if (isAudioMonitoring) {
+      await stopAudioMonitor();
+    } else {
+      await startAudioMonitor();
+    }
+  }
+
   @override
   void dispose() {
+    _commandConnection?.close();
     _btStreamSubscription?.cancel();
     _messageStreamController.close();
+    _audioController?.dispose();
     super.dispose();
   }
 }

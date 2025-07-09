@@ -74,15 +74,12 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     });
 
     try {
-      BluetoothConnection connection =
-          await BluetoothConnection.toAddress(_selectedDevice!.address);
-
-      // If connection is successful, navigate to the MainScreen
-      // and replace the current screen so the user can't go "back" to it.
+      // No need to create a BluetoothConnection here; RadioController handles it.
+      // Navigate to the MainScreen, passing the selected BluetoothDevice.
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => MainScreen(connection: connection),
+            builder: (context) => MainScreen(device: _selectedDevice!),
           ),
         );
       }

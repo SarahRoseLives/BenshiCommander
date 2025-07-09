@@ -46,6 +46,9 @@ dependencies:
   http: ^1.2.1
   geocoding: ^2.2.0
   package_info_plus: ^8.0.0
+  ffmpeg_kit_flutter_new: ^2.0.0
+  just_audio: ^0.9.36
+  provider: ^6.1.2
 
 dev_dependencies:
   flutter_test:

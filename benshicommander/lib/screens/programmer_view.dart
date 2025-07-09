@@ -39,6 +39,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
 
   // Expansion state for memory library card
   bool _memoryLibraryExpanded = false;
+  Key _memoryLibraryKey = UniqueKey();
 
   @override
   void initState() {
@@ -203,6 +204,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       _orderHasChanged = true;
       _statusMessage = 'Loaded backup: ${backup.name}';
       _memoryLibraryExpanded = false;
+      _memoryLibraryKey = UniqueKey();
     });
   }
 
@@ -219,22 +221,44 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       _orderHasChanged = true;
       _statusMessage = 'Loaded preloaded list: ${asset.name}';
       _memoryLibraryExpanded = false;
+      _memoryLibraryKey = UniqueKey();
     });
   }
 
   Future<void> _createNewList() async {
+    // Create a new list of 32 empty channels
+    List<Channel> emptyChannels = List.generate(
+      32,
+      (i) => Channel(
+        channelId: i,
+        name: '',
+        rxFreq: 0.0,
+        txFreq: 0.0,
+        txMod: ModulationType.FM,
+        rxMod: ModulationType.FM,
+        bandwidth: BandwidthType.NARROW,
+        scan: false,
+        txAtMaxPower: false, // "Low" power
+        txAtMedPower: false,
+        rxSubAudio: null,
+        txSubAudio: null,
+      ),
+    );
+
     setState(() {
-      _channels = [];
+      _channels = emptyChannels;
       _modifiedChannelIds.clear();
       _orderHasChanged = true;
       _statusMessage = "Created new empty memory list.";
       _memoryLibraryExpanded = false;
+      _memoryLibraryKey = UniqueKey();
     });
   }
 
   void _closeMemoryLibraryCard() {
     setState(() {
       _memoryLibraryExpanded = false;
+      _memoryLibraryKey = UniqueKey();
     });
   }
 
@@ -460,7 +484,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
                     style: TextStyle(
                         fontWeight: isModified ? FontWeight.bold : FontWeight.normal)),
                 subtitle: Text(
-                    '${channel.rxFreq.toStringAsFixed(4)} MHz | ${channel.txPower} | ${channel.bandwidth.name}'),
+                    '${channel.rxFreq.toStringAsFixed(4)} MHz | ${channel.txPower ?? ''} | ${channel.bandwidth.name}'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -577,6 +601,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     return Card(
       margin: const EdgeInsets.fromLTRB(8, 0, 8, 12),
       child: ExpansionTile(
+        key: _memoryLibraryKey,
         leading: const Icon(Icons.save),
         title: const Text('Memory Library'),
         subtitle: const Text('Save & restore radio memory lists'),
@@ -606,7 +631,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
               ],
             ),
           ),
-          // Scrollable content below the two top buttons
           if (_preloadAssets.isNotEmpty || _loadingBackups || _backups.isNotEmpty)
             SizedBox(
               height: 220,
@@ -724,7 +748,7 @@ class _EditChannelDialogState extends State<_EditChannelDialog> {
     _txFreqController = TextEditingController(text: ch.txFreq.toString());
 
     _bandwidth = ch.bandwidth;
-    _power = ch.txPower;
+    _power = ch.txPower ?? 'Low';
     _scan = ch.scan;
 
     final rxTuple = _getToneTypeAndValue(ch.rxSubAudio);

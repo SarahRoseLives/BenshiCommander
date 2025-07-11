@@ -2,10 +2,10 @@ import '../benshi/protocol/protocol.dart';
 
 class Repeater {
   final String callsign;
-  final double outputFrequency; // RX Freq
-  final double inputFrequency;  // TX Freq
-  final String uplinkTone;
-  final String downlinkTone;
+  final double outputFrequency; // RX Freq (what you listen to)
+  final double inputFrequency;  // TX Freq (what you transmit on)
+  final String uplinkTone;      // TX tone (to access the repeater)
+  final String downlinkTone;    // RX tone (from repeater, for squelch)
   final String name;
   final double latitude;
   final double longitude;
@@ -22,61 +22,59 @@ class Repeater {
   });
 
   factory Repeater.fromJson(Map<String, dynamic> json) {
-    // Helper to get a value regardless of key format (e.g., snake_case vs. Title Case)
-    dynamic getValue(String key1, String key2) {
-      return json[key1] ?? json[key2];
-    }
+    // Direct mapping for RepeaterBook API fields based on your sample JSON
 
-    // Safely parse the output frequency (RX)
-    final outputFreq = double.tryParse(getValue('frequency', 'Frequency')?.toString() ?? '0.0') ?? 0.0;
+    // RX frequency (what you listen to)
+    final double outputFreq = double.tryParse(
+      (json['Frequency'] ?? json['frequency'] ?? '').toString()
+    ) ?? 0.0;
 
-    // Safely parse the input frequency (TX)
-    double inputFreq = double.tryParse(getValue('input_frequency', 'Input Frequency')?.toString() ?? '0.0') ?? 0.0;
+    // TX frequency (what you transmit on)
+    final double inputFreq = double.tryParse(
+      (json['Input Freq'] ?? json['input_frequency'] ?? json['Input Frequency'] ?? '').toString()
+    ) ?? 0.0;
 
-    // If TX frequency is 0, calculate it from the offset and duplex direction
-    if (inputFreq == 0.0) {
-        final double offsetVal = double.tryParse(getValue('offset', 'Offset')?.toString() ?? '0.0') ?? 0.0;
-        final String duplex = getValue('duplex', 'Duplex')?.toString() ?? '';
+    // TX tone (to access the repeater)
+    final String uplinkTone = (json['PL'] ?? json['PL/CTCSS Uplink'] ?? '').toString().trim();
+    // RX tone (for squelch, optional)
+    final String downlinkTone = (json['TSQ'] ?? json['PL/CTCSS TSQ Downlink'] ?? '').toString().trim();
 
-        if (offsetVal != 0.0 && duplex.isNotEmpty && (duplex == '+' || duplex == '-')) {
-            inputFreq = duplex == '+' ? outputFreq + offsetVal : outputFreq - offsetVal;
-        } else {
-            // Assume simplex if no offset/duplex info is available
-            inputFreq = outputFreq;
-        }
-    }
+    // Name/location
+    final String name = (json['Nearest City'] ?? json['nearest_city'] ?? json['Location/Nearest City'] ?? json['city'] ?? '').toString();
+
+    // Latitude/Longitude
+    final double latitude = double.tryParse(
+      (json['Lat'] ?? json['lat'] ?? json['latitude'] ?? '').toString()
+    ) ?? 0.0;
+    final double longitude = double.tryParse(
+      (json['Long'] ?? json['lng'] ?? json['longitude'] ?? '').toString()
+    ) ?? 0.0;
+
+    // Callsign
+    final String callsign = (json['Callsign'] ?? json['callsign'] ?? '').toString();
 
     return Repeater(
-      callsign: getValue('callsign', 'Callsign')?.toString() ?? 'N/A',
+      callsign: callsign.isNotEmpty ? callsign : 'N/A',
       outputFrequency: outputFreq,
       inputFrequency: inputFreq,
-      uplinkTone: getValue('uplink_tone', 'PL/CTCSS Uplink')?.toString() ?? 'None',
-      downlinkTone: getValue('downlink_tone', 'PL/CTCSS TSQ Downlink')?.toString() ?? 'None',
-      name: getValue('nearest_city', 'Location/Nearest City')?.toString() ?? 'Repeater',
-      latitude: double.tryParse(getValue('lat', 'Latitude')?.toString() ?? '0.0') ?? 0.0,
-      longitude: double.tryParse(getValue('lng', 'Longitude')?.toString() ?? '0.0') ?? 0.0,
+      uplinkTone: uplinkTone.isNotEmpty ? uplinkTone : 'None',
+      downlinkTone: downlinkTone.isNotEmpty ? downlinkTone : 'None',
+      name: name.isNotEmpty ? name : 'Repeater',
+      latitude: latitude,
+      longitude: longitude,
     );
   }
 
-  // Helper to convert a Repeater into a radio Channel
+  // Convert a Repeater into a radio Channel
   Channel toChannel(int channelId) {
     dynamic rxSubAudio;
     dynamic txSubAudio;
 
     // Parse RX subaudio from the repeater's downlink tone
-    if (double.tryParse(downlinkTone) != null) {
-      rxSubAudio = double.parse(downlinkTone);
-    } else if (downlinkTone.startsWith('D') && downlinkTone.length >= 4) {
-      // Handles DCS codes like "D023N"
-      rxSubAudio = int.tryParse(downlinkTone.substring(1, 4));
-    }
+    rxSubAudio = _parseToneField(downlinkTone);
 
     // Parse TX subaudio from the repeater's uplink tone
-    if (double.tryParse(uplinkTone) != null) {
-      txSubAudio = double.parse(uplinkTone);
-    } else if (uplinkTone.startsWith('D') && uplinkTone.length >= 4) {
-      txSubAudio = int.tryParse(uplinkTone.substring(1, 4));
-    }
+    txSubAudio = _parseToneField(uplinkTone);
 
     return Channel(
       channelId: channelId,
@@ -89,8 +87,24 @@ class Repeater {
       scan: false,
       txAtMaxPower: true,
       txAtMedPower: false,
-      bandwidth: BandwidthType.WIDE, // Correctly set to WIDE for ham repeaters
+      bandwidth: BandwidthType.WIDE, // Ham repeaters use wide FM
       name: callsign.length > 10 ? callsign.substring(0, 10) : callsign,
     );
+  }
+
+  // Helpers for tone parsing
+  static dynamic _parseToneField(String tone) {
+    final t = tone.trim();
+    if (t.isEmpty || t.toLowerCase() == 'none' || t == '-') return null;
+    // DCS format: D023N, D023, D654, D054N etc.
+    if (t.startsWith('D') && t.length >= 4 && RegExp(r'^D\d{3}[A-Z]?$').hasMatch(t)) {
+      // Parse just the numeric part
+      final dcsNum = int.tryParse(t.substring(1, 4));
+      return dcsNum;
+    }
+    // CTCSS/PL: 88.5, 151.4, etc.
+    final ctcssVal = double.tryParse(t);
+    if (ctcssVal != null) return ctcssVal;
+    return null;
   }
 }

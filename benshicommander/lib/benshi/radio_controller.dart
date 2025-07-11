@@ -45,6 +45,14 @@ class RadioController extends ChangeNotifier {
   // --- NEW Audio State ---
   bool isAudioMonitoring = false;
 
+  // --- NEW VFO Scan State ---
+  bool isVfoScanning = false;
+  double _vfoScanStartFreq = 0.0;
+  double _vfoScanEndFreq = 0.0;
+  int _vfoScanStepKhz = 25;
+  double currentVfoFrequencyMhz = 0.0;
+  Timer? _vfoScanTimer;
+
   // MODIFIED: Update constructor to take the device
   RadioController({required this.device});
 
@@ -249,22 +257,87 @@ class RadioController extends ChangeNotifier {
     return await getChannel(vfoChannelId);
   }
 
-  /// Set VFO frequency by always operating on VFO channel (channelId 0)
-  Future<void> setVfoFrequency(double frequency) async {
-    const vfoChannelId = 0;
-    final vfoChannel = await getChannel(vfoChannelId);
+  /// This is the new, correct implementation for setting the VFO frequency.
+  Future<void> setVfoFrequency(double frequencyMhz) async {
+    // 1. Get the current settings of the VFO channel (usually channel 0).
+    // This is crucial to preserve settings like tones, bandwidth, power etc.
+    final Channel vfoChannel;
+    try {
+      vfoChannel = await getChannel(0);
+    } catch (e) {
+      if (kDebugMode) print("Could not read VFO channel 0 to update it: $e");
+      return;
+    }
 
-    final newChannel = vfoChannel.copyWith(
-      rxFreq: frequency,
-      txFreq: frequency,
+    // 2. Create a new Channel object, copying all existing settings but
+    //    updating only the RX and TX frequencies.
+    final updatedVfoChannel = vfoChannel.copyWith(
+      rxFreq: frequencyMhz,
+      txFreq: frequencyMhz, // For simplex scanning, RX and TX are the same.
     );
 
-    await writeChannel(newChannel);
-    currentChannel = newChannel;
+    // 3. Write the entire updated channel object back to the radio.
+    //    The existing writeChannel method already uses the correct WRITE_RF_CH command.
+    await writeChannel(updatedVfoChannel);
+
+    // 4. Update local state for the UI
+    currentChannel = updatedVfoChannel; // Keep the main channel display in sync
+    currentVfoFrequencyMhz = frequencyMhz;
     notifyListeners();
   }
 
-  // NEW: Writes a single channel's configuration to the radio.
+  /// Starts the VFO frequency scanning process.
+  Future<void> startVfoScan({required double startFreqMhz, required double endFreqMhz, required int stepKhz}) async {
+    if (isVfoScanning) return;
+
+    // 1. Switch radio to VFO A mode (vfoX: 1)
+    if (settings == null) await getSettings();
+    if (settings == null) return;
+    final newSettings = settings!.copyWith(vfoX: 1);
+    await _sendCommand(Message(
+      commandGroup: CommandGroup.BASIC,
+      command: BasicCommand.WRITE_SETTINGS,
+      isReply: false,
+      body: WriteSettingsBody(settings: newSettings),
+    ));
+    settings = newSettings;
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // 2. Start the scan
+    isVfoScanning = true;
+    _vfoScanStartFreq = startFreqMhz;
+    _vfoScanEndFreq = endFreqMhz;
+    _vfoScanStepKhz = stepKhz;
+    currentVfoFrequencyMhz = startFreqMhz;
+
+    await setVfoFrequency(currentVfoFrequencyMhz);
+
+    _vfoScanTimer?.cancel();
+    _vfoScanTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) { // Slightly increased dwell time
+      if (!isVfoScanning || (status?.isSq ?? false)) {
+        return; // Pause if stopped or if squelch is open
+      }
+
+      currentVfoFrequencyMhz += (_vfoScanStepKhz / 1000.0);
+      if (currentVfoFrequencyMhz > _vfoScanEndFreq) {
+        currentVfoFrequencyMhz = _vfoScanStartFreq;
+      }
+
+      setVfoFrequency(currentVfoFrequencyMhz);
+    });
+
+    notifyListeners();
+  }
+
+  /// Stops the VFO scanning process.
+  void stopVfoScan() {
+    isVfoScanning = false;
+    _vfoScanTimer?.cancel();
+    _vfoScanTimer = null;
+    notifyListeners();
+  }
+
+  // Writes a single channel's configuration to the radio.
   Future<void> writeChannel(Channel channel) async {
       final reply = await _sendCommandExpectReply<WriteRFChReplyBody>(
           command: Message(
@@ -454,6 +527,7 @@ class RadioController extends ChangeNotifier {
 
   @override
   void dispose() {
+    stopVfoScan(); // Make sure the timer is cancelled
     _commandConnection?.close();
     _btStreamSubscription?.cancel();
     _messageStreamController.close();

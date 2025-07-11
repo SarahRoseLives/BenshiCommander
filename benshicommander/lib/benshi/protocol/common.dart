@@ -22,6 +22,7 @@ enum BasicCommand {
   SET_IN_SCAN(16),
   GET_HT_STATUS(20),
   SET_POSITION(32),
+  // FREQ_MODE_SET_PAR(35), // <-- REMOVED
   GET_POSITION(76);
 
   const BasicCommand(this.value);

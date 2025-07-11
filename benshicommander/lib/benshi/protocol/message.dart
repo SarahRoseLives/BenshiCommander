@@ -86,6 +86,7 @@ class Message {
         case BasicCommand.SET_IN_SCAN:
           parsedBody = isReply ? SetInScanReplyBody.fromBytes(bodyBytes) : SetInScanBody(enable: bodyBytes[0] > 0);
           break;
+        // REMOVED: FREQ_MODE_SET_PAR
         default:
           parsedBody = UnknownBody(data: bodyBytes);
       }

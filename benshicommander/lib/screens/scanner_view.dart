@@ -3,6 +3,9 @@ import 'dart:async';
 import '../benshi/radio_controller.dart';
 import '../benshi/protocol/protocol.dart';
 
+// New enum to manage which scan mode is active
+enum ScanMode { memory, vfo }
+
 class ScannerView extends StatefulWidget {
   final RadioController radioController;
   const ScannerView({Key? key, required this.radioController}) : super(key: key);
@@ -17,6 +20,13 @@ class _ScannerViewState extends State<ScannerView> {
   bool _isLoading = true;
   String _statusMessage = '';
 
+  // State for VFO scanning
+  ScanMode _scanMode = ScanMode.memory;
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _startFreqController = TextEditingController(text: '144.0');
+  final TextEditingController _endFreqController = TextEditingController(text: '148.0');
+  final TextEditingController _stepController = TextEditingController(text: '25'); // Step in kHz
+
   @override
   void initState() {
     super.initState();
@@ -29,6 +39,13 @@ class _ScannerViewState extends State<ScannerView> {
   @override
   void dispose() {
     widget.radioController.removeListener(_onRadioUpdate);
+    _startFreqController.dispose();
+    _endFreqController.dispose();
+    _stepController.dispose();
+    // Ensure scanning is stopped when leaving the view
+    if (widget.radioController.isVfoScanning) {
+      widget.radioController.stopVfoScan();
+    }
     super.dispose();
   }
 
@@ -78,6 +95,25 @@ class _ScannerViewState extends State<ScannerView> {
     }
   }
 
+  void _startVfoScan() {
+    if (_formKey.currentState!.validate()) {
+      final double startFreq = double.parse(_startFreqController.text);
+      final double endFreq = double.parse(_endFreqController.text);
+      final int stepKHz = int.parse(_stepController.text);
+
+      if (endFreq <= startFreq) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("End frequency must be greater than start.")));
+        return;
+      }
+
+      widget.radioController.startVfoScan(
+        startFreqMhz: startFreq,
+        endFreqMhz: endFreq,
+        stepKhz: stepKHz,
+      );
+    }
+  }
+
   Future<void> _toggleChannelInScanList(Channel channel, bool includeInScan) async {
     try {
       final updatedChannel = channel.copyWith(scan: includeInScan);
@@ -97,14 +133,41 @@ class _ScannerViewState extends State<ScannerView> {
   @override
   Widget build(BuildContext context) {
     final radio = widget.radioController;
-    final bool isScanning = radio.isScan;
+    final bool isMemoryScanning = radio.isScan;
+    final bool isVfoScanning = radio.isVfoScanning;
 
     return Column(
       children: [
-        // --- Top Control Panel ---
-        _buildControlPanel(isScanning, radio),
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SegmentedButton<ScanMode>(
+            segments: const [
+              ButtonSegment(value: ScanMode.memory, label: Text('Memory Scan'), icon: Icon(Icons.list)),
+              ButtonSegment(value: ScanMode.vfo, label: Text('VFO Scan'), icon: Icon(Icons.tune)),
+            ],
+            selected: {_scanMode},
+            onSelectionChanged: (Set<ScanMode> newSelection) {
+              setState(() {
+                _scanMode = newSelection.first;
+              });
+            },
+          ),
+        ),
         const Divider(height: 1),
-        // --- Channel List ---
+        Expanded(
+          child: _scanMode == ScanMode.memory
+              ? _buildMemoryScanner(isMemoryScanning)
+              : _buildVfoScanner(isVfoScanning),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMemoryScanner(bool isScanning) {
+    return Column(
+      children: [
+        _buildControlPanel(isScanning),
+        const Divider(height: 1),
         Expanded(
           child: _isLoading && _channels == null
               ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(), const SizedBox(height: 16), Text(_statusMessage)]))
@@ -114,49 +177,91 @@ class _ScannerViewState extends State<ScannerView> {
     );
   }
 
-  Widget _buildControlPanel(bool isScanning, RadioController radio) {
+  Widget _buildControlPanel(bool isScanning) {
+    final radio = widget.radioController;
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ElevatedButton.icon(
-                icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.play_circle_outline),
-                label: Text(isScanning ? 'Stop Memory Scan' : 'Start Memory Scan'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isScanning ? Colors.redAccent : Colors.green,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  textStyle: const TextStyle(fontSize: 16),
-                ),
-                onPressed: _toggleMasterScan,
-              ),
-            ],
+          ElevatedButton.icon(
+            icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+            label: Text(isScanning ? 'Stop Memory Scan' : 'Start Memory Scan'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isScanning ? Colors.redAccent : Colors.green,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              textStyle: const TextStyle(fontSize: 16),
+            ),
+            onPressed: _toggleMasterScan,
           ),
           const SizedBox(height: 16),
-          // --- Status Indicators ---
-          Wrap(
-            spacing: 24,
-            runSpacing: 12,
-            alignment: WrapAlignment.center,
-            children: [
-              _buildStatusIndicator(
-                  Icons.track_changes,
-                  isScanning ? 'SCANNING' : 'IDLE',
-                  isScanning ? Colors.orange : Colors.grey),
-              _buildStatusIndicator(
-                  Icons.sensors,
-                  radio.isInRx ? radio.currentChannelName : '...',
-                  radio.isInRx ? Colors.green : Colors.grey),
-              _buildStatusIndicator(
-                  Icons.sensors_off,
-                  radio.isSq ? 'SIGNAL DETECTED' : 'SQUELCH CLOSED',
-                  radio.isSq ? Colors.green : Colors.grey),
-            ],
-          )
+          _buildStatusIndicators(),
         ],
       ),
+    );
+  }
+
+  Widget _buildVfoScanner(bool isScanning) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ElevatedButton.icon(
+              icon: Icon(isScanning ? Icons.stop_circle_outlined : Icons.play_circle_outline),
+              label: Text(isScanning ? 'Stop VFO Scan' : 'Start VFO Scan'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isScanning ? Colors.redAccent : Colors.teal,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                textStyle: const TextStyle(fontSize: 16),
+              ),
+              onPressed: isScanning ? () => widget.radioController.stopVfoScan() : _startVfoScan,
+            ),
+            const SizedBox(height: 24),
+            TextFormField(
+              controller: _startFreqController,
+              decoration: const InputDecoration(labelText: 'Start Frequency (MHz)', border: OutlineInputBorder()),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) => (double.tryParse(v ?? '') == null) ? 'Invalid frequency' : null,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _endFreqController,
+              decoration: const InputDecoration(labelText: 'End Frequency (MHz)', border: OutlineInputBorder()),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) => (double.tryParse(v ?? '') == null) ? 'Invalid frequency' : null,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _stepController,
+              decoration: const InputDecoration(labelText: 'Step (kHz)', border: OutlineInputBorder()),
+              keyboardType: TextInputType.number,
+              validator: (v) => (int.tryParse(v ?? '') == null) ? 'Invalid step' : null,
+            ),
+            const SizedBox(height: 24),
+            _buildStatusIndicators(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusIndicators() {
+    final radio = widget.radioController;
+    final isScanning = radio.isScan || radio.isVfoScanning;
+    return Wrap(
+      spacing: 24,
+      runSpacing: 12,
+      alignment: WrapAlignment.center,
+      children: [
+        _buildStatusIndicator(Icons.track_changes, isScanning ? 'SCANNING' : 'IDLE', isScanning ? Colors.orange : Colors.grey),
+        _buildStatusIndicator(
+            Icons.sensors,
+            radio.isInRx ? radio.currentChannelName : (_scanMode == ScanMode.vfo ? '${radio.currentVfoFrequencyMhz.toStringAsFixed(4)} MHz' : '...'),
+            radio.isInRx ? Colors.green : Colors.grey),
+        _buildStatusIndicator(Icons.sensors_off, radio.isSq ? 'SIGNAL DETECTED' : 'SQUELCH CLOSED', radio.isSq ? Colors.green : Colors.grey),
+      ],
     );
   }
 

@@ -1,3 +1,5 @@
+// screens/programmer_view.dart
+
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:io';
@@ -10,6 +12,7 @@ import '../services/memory_storage_service.dart';
 import '../services/location_service.dart';
 import '../services/repeaterbook_service.dart';
 import 'package:geolocator/geolocator.dart' as geo;
+import 'donation_screen.dart';
 
 class ProgrammerView extends StatefulWidget {
   final RadioController radioController;
@@ -37,7 +40,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   List<MemoryBackup> _preloadAssets = [];
   bool _loadingBackups = true;
 
-  // Expansion state for memory library card
   bool _memoryLibraryExpanded = false;
   Key _memoryLibraryKey = UniqueKey();
 
@@ -47,7 +49,7 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     _chirpExporter = ChirpExporter(
       radioController: widget.radioController,
       onStatusUpdate: (message) {
-        if (mounted) setState(() {});
+        if (mounted) setState(() => _statusMessage = message);
       },
       onChannelsUpdatedFromWeb: (List<Channel> updatedChannels) {
         if (mounted) {
@@ -64,6 +66,107 @@ class _ProgrammerViewState extends State<ProgrammerView> {
     _loadPreloadAssets();
   }
 
+  @override
+  void dispose() {
+    _chirpExporter.stop();
+    _positionStream?.cancel();
+    super.dispose();
+  }
+
+  // All other methods (_refreshBackups, _loadPreloadAssets, _readChannelsFromRadio, etc.) remain unchanged.
+  // ...
+
+  // --- WIDGET BUILD METHODS ---
+
+  @override
+  Widget build(BuildContext context) {
+    return _isLoading ? _buildLoadingView() : _buildMainContent();
+  }
+
+  Widget _buildMainContent() {
+    return Column(
+      children: [
+        Expanded(
+          child: _channels == null ? _buildInitialView() : _buildProgrammerView(),
+        ),
+        _buildChirpExportCard(), // This method is now corrected
+        _buildMemoryLibraryCard(),
+      ],
+    );
+  }
+
+  // --- CORRECTED METHOD ---
+  Widget _buildChirpExportCard() {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+      child: ExpansionTile(
+        leading: Icon(Icons.http, color: Colors.teal.shade700),
+        title: const Text('Web Programmer'),
+        subtitle: Text(_chirpExporter.isRunning ? 'Server is ON' : 'Server is OFF'),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  _chirpExporter.isRunning
+                      ? 'Server is running. Open this address in a web browser on the same network:'
+                      : 'Start the server to edit channels over your local network.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                if (_chirpExporter.isRunning && _chirpExporter.serverUrl != null)
+                  SelectableText(
+                    _chirpExporter.serverUrl!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple,
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  // Make the onPressed callback async
+                  onPressed: () async {
+                    if (_chirpExporter.isRunning) {
+                      await _chirpExporter.stop();
+                    } else {
+                      // Prevent starting server if no channels are loaded
+                      if (_channels == null || _channels!.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please read channels from radio first.'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      await _chirpExporter.start();
+                    }
+                    // Update the UI after the async operation is complete
+                    if(mounted) setState(() {});
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        _chirpExporter.isRunning ? Colors.redAccent : Colors.green,
+                  ),
+                  child: Text(_chirpExporter.isRunning ? 'Stop Server' : 'Start Server'),
+                ),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  // The rest of your unchanged code follows...
+  // _buildLoadingView, _buildInitialView, _buildProgrammerView, _buildMemoryLibraryCard, _promptForName, etc.
+  // ...
+  // --- PASTE THE REST OF YOUR ORIGINAL `_ProgrammerViewState` CLASS HERE ---
+  // (The unchanged methods like _loadLocalRepeaters, _writeAllChannelsToRadio, etc.)
   Future<void> _refreshBackups() async {
     setState(() => _loadingBackups = true);
     _backups = await MemoryStorageService().listBackups();
@@ -73,13 +176,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
   Future<void> _loadPreloadAssets() async {
     _preloadAssets = await MemoryStorageService().listPreloadAssets();
     setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _chirpExporter.stop();
-    _positionStream?.cancel();
-    super.dispose();
   }
 
   void _updateStatus(String message) {
@@ -344,7 +440,44 @@ class _ProgrammerViewState extends State<ProgrammerView> {
       _modifiedChannelIds.clear();
       _orderHasChanged = false;
     });
+
+    // --- NEW: Show a one-time "thank you" dialog ---
+    _showPostWriteDonationDialog(context);
+
     await _readChannelsFromRadio();
+  }
+
+  // --- NEW: Add this helper method to the class ---
+  void _showPostWriteDonationDialog(BuildContext context) {
+    // Here you would use a preference service (like shared_preferences)
+    // to check if you've shown this dialog before. For simplicity, we'll skip that check here.
+    // e.g., if (await PreferencesService.shouldShowDonationDialog()) { ... }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Programming Complete!'),
+        content: const Text('Channels successfully written to your radio. If you love this feature, consider supporting the app\'s development!'),
+        actions: [
+          TextButton(
+            child: const Text('Maybe Later'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          ElevatedButton(
+            child: const Text('See Options'),
+            onPressed: () {
+              Navigator.of(context).pop(); // Close dialog
+              Navigator.of(context).push( // Open donation screen
+                MaterialPageRoute(builder: (context) => const DonationScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+
+    // Mark that you've shown the dialog so you don't show it again.
+    // e.g., await PreferencesService.setDonationDialogShown();
   }
 
   Future<void> _editChannel(int index) async {
@@ -363,23 +496,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
         _modifiedChannelIds.add(updatedChannel.channelId);
       });
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _isLoading ? _buildLoadingView() : _buildMainContent();
-  }
-
-  Widget _buildMainContent() {
-    return Column(
-      children: [
-        Expanded(
-          child: _channels == null ? _buildInitialView() : _buildProgrammerView(),
-        ),
-        _buildChirpExportCard(),
-        _buildMemoryLibraryCard(),
-      ],
-    );
   }
 
   Widget _buildLoadingView() {
@@ -540,60 +656,6 @@ class _ProgrammerViewState extends State<ProgrammerView> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildChirpExportCard() {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-      child: ExpansionTile(
-        leading: Icon(Icons.http, color: Colors.teal.shade700),
-        title: const Text('Web Programmer'),
-        subtitle: Text(_chirpExporter.isRunning ? 'Server is ON' : 'Server is OFF'),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  _chirpExporter.isRunning
-                      ? 'Server is running. Open this address in a web browser on the same network:'
-                      : 'Start the server to edit channels over your local network.',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                if (_chirpExporter.isRunning && _chirpExporter.serverUrl != null)
-                  SelectableText(
-                    _chirpExporter.serverUrl!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.deepPurple,
-                    ),
-                  ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    if (_chirpExporter.isRunning) {
-                      _chirpExporter.stop();
-                    } else {
-                      _chirpExporter.start();
-                    }
-                    setState(() {});
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        _chirpExporter.isRunning ? Colors.redAccent : Colors.green,
-                  ),
-                  child: Text(_chirpExporter.isRunning ? 'Stop Server' : 'Start Server'),
-                ),
-              ],
-            ),
-          )
-        ],
-      ),
     );
   }
 

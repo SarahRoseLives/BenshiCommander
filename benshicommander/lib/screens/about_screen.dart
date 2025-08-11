@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'donation_screen.dart'; // Import the DonationScreen
 
 class AboutScreen extends StatefulWidget {
   const AboutScreen({super.key});
@@ -54,6 +55,26 @@ class _AboutScreenState extends State<AboutScreen> {
             ),
           ),
           const Divider(height: 40),
+
+          // --- NEW: Support the Project Section ---
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16.0),
+            color: Colors.blue.shade50,
+            elevation: 0,
+            child: ListTile(
+              leading: Icon(Icons.favorite, color: Colors.red.shade400),
+              title: const Text('Support This Project', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('If you find this app useful, consider a donation to support its development.'),
+              trailing: const Icon(Icons.arrow_forward_ios),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => const DonationScreen()),
+                );
+              },
+            ),
+          ),
+          const Divider(height: 40),
+
           ListTile(
             leading: const Icon(Icons.description),
             title: const Text('View Licenses'),

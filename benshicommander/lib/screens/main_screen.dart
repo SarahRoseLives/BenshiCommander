@@ -73,20 +73,7 @@ class _MainScreenState extends State<MainScreen> {
         appBar: AppBar(
           title: Text(titles[_selectedIndex]), // Title changes based on selected tab
           actions: [
-            // --- Speaker/Audio Monitor toggle button ---
-            Consumer<RadioController>(
-              builder: (context, radio, child) {
-                return IconButton(
-                  icon: Icon(
-                    radio.isAudioMonitoring ? Icons.volume_up : Icons.volume_off,
-                    color: radio.isAudioMonitoring ? Colors.blueAccent : null,                  ),
-                  tooltip: radio.isAudioMonitoring ? 'Stop Monitoring' : 'Start Monitoring',
-                  onPressed: () {
-                    radio.toggleAudioMonitor();
-                  },
-                );
-              },
-            ),
+            // --- Speaker/Audio Monitor toggle button has been removed ---
             IconButton(
               icon: const Icon(Icons.bluetooth_disabled),
               tooltip: 'Disconnect',

@@ -1,9 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'screens/connection_screen.dart';
+import 'services/donation_service.dart'; // Import the service
 
 // The entry point for the entire application.
 void main() {
-  runApp(const RadioCommanderApp());
+  runApp(
+    // Wrap your app with a MultiProvider
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => DonationService()..initialize()),
+      ],
+      child: const RadioCommanderApp(),
+    ),
+  );
 }
 
 class RadioCommanderApp extends StatelessWidget {

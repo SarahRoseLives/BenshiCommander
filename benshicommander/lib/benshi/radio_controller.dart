@@ -4,16 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'protocol/protocol.dart';
 
-// --- NEW: import AudioController ---
-import 'audio_controller.dart';
-
 class RadioController extends ChangeNotifier {
   // MODIFIED: Store the full device instead of just connection
   final BluetoothDevice device;
   BluetoothConnection? _commandConnection;
-
-  // --- NEW: AudioController reference ---
-  AudioController? _audioController;
 
   final StreamController<Message> _messageStreamController = StreamController<Message>.broadcast();
   StreamSubscription? _btStreamSubscription;
@@ -42,10 +36,10 @@ class RadioController extends ChangeNotifier {
   bool get isGpsLocked => status?.isGpsLocked ?? false;
   bool get supportsVfo => deviceInfo?.supportsVfo ?? false;
 
-  // --- NEW Audio State ---
-  bool isAudioMonitoring = false;
+  // --- VFO Scan Channel Constant ---
+  static const int _vfoScanChannelId = 252;
 
-  // --- NEW VFO Scan State ---
+  // --- VFO Scan State ---
   bool isVfoScanning = false;
   double _vfoScanStartFreq = 0.0;
   double _vfoScanEndFreq = 0.0;
@@ -53,21 +47,13 @@ class RadioController extends ChangeNotifier {
   double currentVfoFrequencyMhz = 0.0;
   Timer? _vfoScanTimer;
 
-  // MODIFIED: Update constructor to take the device
   RadioController({required this.device});
 
-  // NEW: Method to establish the command connection
   Future<void> connect() async {
     if (_commandConnection?.isConnected ?? false) return;
     _commandConnection = await BluetoothConnection.toAddress(device.address);
     _btStreamSubscription = _commandConnection!.input!.listen(_onDataReceived);
     _initializeRadioState();
-
-    // IMPORTANT: You must find the correct RFCOMM channel for audio.
-    // It's often channel 2 or 3 if commands are on 1, but this varies.
-    // Tools like `sdptool records <device_address>` on Linux can find this.
-    // For now, we'll hardcode a common value like `2`.
-    _audioController = AudioController(deviceAddress: device.address, rfcommChannel: 4);
     notifyListeners();
   }
 
@@ -200,7 +186,6 @@ class RadioController extends ChangeNotifier {
     await _commandConnection?.output.allSent;
   }
 
-  // UPDATED to be more generic and reliable
   Future<T> _sendCommandExpectReply<T extends ReplyBody>({
     required Message command,
     required BasicCommand replyCommand,
@@ -250,22 +235,21 @@ class RadioController extends ChangeNotifier {
     }
   }
 
-  /// Get the VFO channel (usually channelId 0)
+  /// Get the VFO channel (channelId 252) used for scanning.
   Future<Channel> getVfoChannel() async {
-    // Most Benshi radios use channelId=0 for VFO.
-    const vfoChannelId = 0;
-    return await getChannel(vfoChannelId);
+    // This radio uses channelId=252 for VFO scanning.
+    return await getChannel(_vfoScanChannelId);
   }
 
   /// This is the new, correct implementation for setting the VFO frequency.
   Future<void> setVfoFrequency(double frequencyMhz) async {
-    // 1. Get the current settings of the VFO channel (usually channel 0).
+    // 1. Get the current settings of the VFO scan channel (252).
     // This is crucial to preserve settings like tones, bandwidth, power etc.
     final Channel vfoChannel;
     try {
-      vfoChannel = await getChannel(0);
+      vfoChannel = await getChannel(_vfoScanChannelId);
     } catch (e) {
-      if (kDebugMode) print("Could not read VFO channel 0 to update it: $e");
+      if (kDebugMode) print("Could not read VFO scan channel $_vfoScanChannelId to update it: $e");
       return;
     }
 
@@ -501,37 +485,12 @@ class RadioController extends ChangeNotifier {
     }
   }
 
-  // --- NEW Public Methods for Audio Control ---
-
-  Future<void> startAudioMonitor() async {
-    if (_audioController == null) return;
-    await _audioController!.startMonitoring();
-    isAudioMonitoring = _audioController!.isMonitoring;
-    notifyListeners();
-  }
-
-  Future<void> stopAudioMonitor() async {
-    if (_audioController == null) return;
-    await _audioController!.stopMonitoring();
-    isAudioMonitoring = _audioController!.isMonitoring;
-    notifyListeners();
-  }
-
-  Future<void> toggleAudioMonitor() async {
-    if (isAudioMonitoring) {
-      await stopAudioMonitor();
-    } else {
-      await startAudioMonitor();
-    }
-  }
-
   @override
   void dispose() {
     stopVfoScan(); // Make sure the timer is cancelled
     _commandConnection?.close();
     _btStreamSubscription?.cancel();
     _messageStreamController.close();
-    _audioController?.dispose();
     super.dispose();
   }
 }
